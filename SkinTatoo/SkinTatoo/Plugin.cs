@@ -55,6 +55,7 @@ public sealed class Plugin : IDalamudPlugin
         IDalamudPluginInterface pluginInterface,
         ICommandManager commandManager,
         IDataManager dataManager,
+        ITextureProvider textureProvider,
         IPluginLog log)
     {
         // ── 1. 配置 ────────────────────────────────────────────────────────────
@@ -88,11 +89,11 @@ public sealed class Plugin : IDalamudPlugin
         project = new DecalProject { Target = config.LastTarget };
 
         // ── 6. HTTP 调试服务 ───────────────────────────────────────────────────
-        debugServer = new DebugServer(config, project, penumbra, previewService);
+        debugServer = new DebugServer(config, project, penumbra, previewService, dataManager);
         debugServer.Start();
 
         // ── 7. GUI ─────────────────────────────────────────────────────────────
-        mainWindow = new MainWindow(project, previewService, penumbra, config);
+        mainWindow = new MainWindow(project, previewService, penumbra, bodyModDetector, config, textureProvider);
         configWindow = new ConfigWindow(config);
 
         windowSystem = new WindowSystem("SkinTatoo");

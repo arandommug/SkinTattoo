@@ -1,9 +1,9 @@
 using System;
 using System.IO;
-using System.Threading.Tasks;
 using Dalamud.Plugin.Services;
 using SkinTatoo.Core;
 using SkinTatoo.Gpu;
+using SkinTatoo.Http;
 using SkinTatoo.Interop;
 using SkinTatoo.Mesh;
 using TerraFX.Interop.DirectX;
@@ -23,7 +23,6 @@ public unsafe class PreviewService : IDisposable
     private readonly IPluginLog log;
     private readonly Configuration config;
 
-    // 每次 LoadMesh 后持有的 GPU 资源
     private ID3D11Texture2D* positionMapTex;
     private ID3D11ShaderResourceView* positionMapSRV;
     private ID3D11Texture2D* normalMapTex;
@@ -35,10 +34,7 @@ public unsafe class PreviewService : IDisposable
     private readonly string outputDir;
     private bool disposed;
 
-    // GPU 管线是否就绪
-    public bool IsReady => dx.IsInitialized && pipeline.IsInitialized;
-
-    // 当前已加载的 mesh，供外部查询（如 DebugServer）
+    public bool IsReady => dx.IsInitialized && pipeline.IsInitialized && currentMesh != null;
     public MeshData? CurrentMesh => currentMesh;
 
     public PreviewService(
@@ -65,30 +61,42 @@ public unsafe class PreviewService : IDisposable
         Directory.CreateDirectory(outputDir);
     }
 
-    // 从游戏 .mdl 路径提取 mesh，生成 position/normal map 并上传至 GPU。
-    // 异步包装：mesh 提取和 CPU 生成在 Task.Run 中进行，GPU 上传在调用线程执行。
-    public Task LoadMesh(string gameMdlPath)
+    // Synchronous — must be called from a thread that can access Dalamud IDataManager
+    public bool LoadMesh(string gameMdlPath)
     {
-        return Task.Run(() => LoadMeshInternal(gameMdlPath));
-    }
+        DebugServer.AppendLog($"[PreviewService] LoadMesh: {gameMdlPath}");
 
-    private void LoadMeshInternal(string gameMdlPath)
-    {
         if (!dx.IsInitialized || !pipeline.IsInitialized)
         {
-            log.Error("PreviewService.LoadMesh: GPU not ready");
-            return;
+            var msg = "LoadMesh failed: GPU not ready";
+            log.Error(msg);
+            DebugServer.AppendLog($"[PreviewService] {msg}");
+            return false;
         }
 
-        var meshData = meshExtractor.ExtractMesh(gameMdlPath);
+        MeshData? meshData;
+        try
+        {
+            meshData = meshExtractor.ExtractMesh(gameMdlPath);
+        }
+        catch (Exception ex)
+        {
+            var msg = $"LoadMesh exception: {ex.Message}";
+            log.Error(ex, msg);
+            DebugServer.AppendLog($"[PreviewService] {msg}");
+            return false;
+        }
+
         if (meshData == null)
         {
-            log.Error("PreviewService.LoadMesh: failed to extract mesh from {0}", gameMdlPath);
-            return;
+            var msg = $"LoadMesh failed: ExtractMesh returned null for {gameMdlPath}";
+            log.Error(msg);
+            DebugServer.AppendLog($"[PreviewService] {msg}");
+            return false;
         }
 
         var res = (uint)Math.Clamp(config.TextureResolution, 256, 4096);
-        mapWidth  = res;
+        mapWidth = res;
         mapHeight = res;
 
         var gen = new PositionMapGenerator((int)res, (int)res);
@@ -96,69 +104,63 @@ public unsafe class PreviewService : IDisposable
 
         FreeMapResources();
 
-        positionMapTex = dx.CreateTexture2D(
-            mapWidth, mapHeight,
-            DXGI_FORMAT_R32G32B32A32_FLOAT,
-            (uint)D3D11_BIND_SHADER_RESOURCE);
-        if (positionMapTex == null) return;
+        positionMapTex = dx.CreateTexture2D(mapWidth, mapHeight,
+            DXGI_FORMAT_R32G32B32A32_FLOAT, (uint)D3D11_BIND_SHADER_RESOURCE);
+        if (positionMapTex == null) return false;
         dx.UploadTextureData(positionMapTex, gen.PositionMap, mapWidth, mapHeight);
         positionMapSRV = dx.CreateSRV(positionMapTex, DXGI_FORMAT_R32G32B32A32_FLOAT);
 
-        normalMapTex = dx.CreateTexture2D(
-            mapWidth, mapHeight,
-            DXGI_FORMAT_R32G32B32A32_FLOAT,
-            (uint)D3D11_BIND_SHADER_RESOURCE);
-        if (normalMapTex == null) return;
+        normalMapTex = dx.CreateTexture2D(mapWidth, mapHeight,
+            DXGI_FORMAT_R32G32B32A32_FLOAT, (uint)D3D11_BIND_SHADER_RESOURCE);
+        if (normalMapTex == null) return false;
         dx.UploadTextureData(normalMapTex, gen.NormalMap, mapWidth, mapHeight);
         normalMapSRV = dx.CreateSRV(normalMapTex, DXGI_FORMAT_R32G32B32A32_FLOAT);
 
         currentMesh = meshData;
-        log.Information("PreviewService: mesh loaded ({0}x{1} maps) from {2}", res, res, gameMdlPath);
+
+        var info = $"Mesh loaded: {meshData.Vertices.Length} verts, {meshData.TriangleCount} tris, {res}x{res} maps";
+        log.Information(info);
+        DebugServer.AppendLog($"[PreviewService] {info}");
+        return true;
     }
 
-    // 对 project 中每个可见层执行完整的投影→合成→膨胀流水线，
-    // 将结果写成 .tex 文件并通过 Penumbra 重定向到 gameTexturePath，然后重绘玩家。
-    public Task UpdatePreview(DecalProject project, string? gameTexturePath)
+    // Synchronous preview update
+    public string? UpdatePreview(DecalProject project, string? gameTexturePath)
     {
-        return Task.Run(() => UpdatePreviewInternal(project, gameTexturePath));
-    }
+        DebugServer.AppendLog($"[PreviewService] UpdatePreview: texPath={gameTexturePath}, layers={project.Layers.Count}");
 
-    private void UpdatePreviewInternal(DecalProject project, string? gameTexturePath)
-    {
-        if (!dx.IsInitialized || !pipeline.IsInitialized)
+        if (!IsReady)
         {
-            log.Error("PreviewService.UpdatePreview: GPU not ready");
-            return;
+            DebugServer.AppendLog("[PreviewService] UpdatePreview failed: not ready (mesh not loaded)");
+            return null;
         }
 
-        if (positionMapSRV == null || normalMapSRV == null)
-        {
-            log.Error("PreviewService.UpdatePreview: no mesh loaded");
-            return;
-        }
-
-        // 累积合成贴图：从全透明黑色开始
         ID3D11Texture2D* accumTex = CreateFloatRWTexture();
-        if (accumTex == null) return;
+        if (accumTex == null) return null;
         ID3D11ShaderResourceView* accumSRV = dx.CreateSRV(accumTex, DXGI_FORMAT_R32G32B32A32_FLOAT);
         ID3D11UnorderedAccessView* accumUAV = dx.CreateUAV(accumTex, DXGI_FORMAT_R32G32B32A32_FLOAT);
 
         try
         {
+            var processedLayers = 0;
             foreach (var layer in project.Layers)
             {
-                if (!layer.IsVisible) continue;
-                if (string.IsNullOrEmpty(layer.ImagePath)) continue;
-
+                if (!layer.IsVisible || string.IsNullOrEmpty(layer.ImagePath)) continue;
                 ProcessLayer(layer, ref accumTex, ref accumSRV, ref accumUAV);
+                processedLayers++;
             }
 
-            // 读回最终结果并写 .tex
+            if (processedLayers == 0)
+            {
+                DebugServer.AppendLog("[PreviewService] UpdatePreview: no visible layers with images");
+                return null;
+            }
+
             var rawData = readback.Readback(accumTex, mapWidth, mapHeight);
             if (rawData == null)
             {
-                log.Error("PreviewService.UpdatePreview: GPU readback returned null");
-                return;
+                DebugServer.AppendLog("[PreviewService] UpdatePreview: GPU readback failed");
+                return null;
             }
 
             var localPath = Path.Combine(outputDir, "preview.tex");
@@ -170,7 +172,14 @@ public unsafe class PreviewService : IDisposable
                 penumbra.RedrawPlayer();
             }
 
-            log.Information("PreviewService: preview updated → {0}", localPath);
+            DebugServer.AppendLog($"[PreviewService] Preview written: {localPath}");
+            return localPath;
+        }
+        catch (Exception ex)
+        {
+            DebugServer.AppendLog($"[PreviewService] UpdatePreview exception: {ex.Message}");
+            log.Error(ex, "UpdatePreview failed");
+            return null;
         }
         finally
         {
@@ -180,7 +189,6 @@ public unsafe class PreviewService : IDisposable
         }
     }
 
-    // 对单个 DecalLayer 执行投影、合成、膨胀，结果写回 accumTex
     private void ProcessLayer(
         DecalLayer layer,
         ref ID3D11Texture2D* accumTex,
@@ -190,11 +198,12 @@ public unsafe class PreviewService : IDisposable
         var imageResult = imageLoader.LoadImage(layer.ImagePath!);
         if (imageResult == null)
         {
-            log.Warning("PreviewService: cannot load image {0}, skipping layer", layer.ImagePath);
+            DebugServer.AppendLog($"[PreviewService] Cannot load image: {layer.ImagePath}");
             return;
         }
 
         var (imgData, imgW, imgH) = imageResult.Value;
+        DebugServer.AppendLog($"[PreviewService] Processing layer '{layer.Name}': {imgW}x{imgH} image");
         var floatData = ConvertRgba8ToFloat4(imgData, imgW, imgH);
 
         ID3D11Texture2D* decalTex = dx.CreateTexture2D(
@@ -206,56 +215,40 @@ public unsafe class PreviewService : IDisposable
         dx.UploadTextureData(decalTex, floatData, (uint)imgW, (uint)imgH);
         ID3D11ShaderResourceView* decalSRV = dx.CreateSRV(decalTex, DXGI_FORMAT_R32G32B32A32_FLOAT);
 
-        // 投影结果缓冲（与 position map 同分辨率）
         ID3D11Texture2D* projBufTex = CreateFloatRWTexture();
         ID3D11UnorderedAccessView* projBufUAV = projBufTex != null
-            ? dx.CreateUAV(projBufTex, DXGI_FORMAT_R32G32B32A32_FLOAT)
-            : null;
+            ? dx.CreateUAV(projBufTex, DXGI_FORMAT_R32G32B32A32_FLOAT) : null;
         ID3D11ShaderResourceView* projBufSRV = projBufTex != null
-            ? dx.CreateSRV(projBufTex, DXGI_FORMAT_R32G32B32A32_FLOAT)
-            : null;
+            ? dx.CreateSRV(projBufTex, DXGI_FORMAT_R32G32B32A32_FLOAT) : null;
 
-        // 膨胀输出缓冲
         ID3D11Texture2D* dilatedTex = CreateFloatRWTexture();
         ID3D11UnorderedAccessView* dilatedUAV = dilatedTex != null
-            ? dx.CreateUAV(dilatedTex, DXGI_FORMAT_R32G32B32A32_FLOAT)
-            : null;
+            ? dx.CreateUAV(dilatedTex, DXGI_FORMAT_R32G32B32A32_FLOAT) : null;
         ID3D11ShaderResourceView* dilatedSRV = dilatedTex != null
-            ? dx.CreateSRV(dilatedTex, DXGI_FORMAT_R32G32B32A32_FLOAT)
-            : null;
+            ? dx.CreateSRV(dilatedTex, DXGI_FORMAT_R32G32B32A32_FLOAT) : null;
 
-        // 新的合成输出（替换 accum）
         ID3D11Texture2D* compositedTex = null;
         ID3D11UnorderedAccessView* compositedUAV = null;
         ID3D11ShaderResourceView* compositedSRV = null;
 
         try
         {
-            if (projBufUAV == null || projBufSRV == null ||
-                dilatedUAV == null || dilatedSRV == null)
+            if (projBufUAV == null || projBufSRV == null || dilatedUAV == null || dilatedSRV == null)
                 return;
 
-            // 1. 投影：将贴花投影到 UV 空间
             var projCB = new ProjectionCB
             {
-                ViewProjection    = layer.GetProjectionMatrix(),
-                ProjectionDir     = layer.GetForwardDirection(),
+                ViewProjection = layer.GetProjectionMatrix(),
+                ProjectionDir = layer.GetForwardDirection(),
                 BackfaceThreshold = layer.BackfaceCullingThreshold,
-                GrazingFade       = layer.GrazingAngleFade,
-                Opacity           = layer.Opacity,
+                GrazingFade = layer.GrazingAngleFade,
+                Opacity = layer.Opacity,
             };
-            pipeline.DispatchProjection(
-                positionMapSRV, normalMapSRV, decalSRV,
-                projBufUAV, projCB,
-                mapWidth, mapHeight);
+            pipeline.DispatchProjection(positionMapSRV, normalMapSRV, decalSRV,
+                projBufUAV, projCB, mapWidth, mapHeight);
 
-            // 2. 膨胀：消除 UV 接缝处的黑边
-            pipeline.DispatchDilation(
-                projBufSRV, projBufSRV,
-                dilatedUAV,
-                mapWidth, mapHeight);
+            pipeline.DispatchDilation(projBufSRV, projBufSRV, dilatedUAV, mapWidth, mapHeight);
 
-            // 3. 合成：将当前层叠加到 accum
             compositedTex = CreateFloatRWTexture();
             if (compositedTex == null) return;
             compositedUAV = dx.CreateUAV(compositedTex, DXGI_FORMAT_R32G32B32A32_FLOAT);
@@ -264,17 +257,11 @@ public unsafe class PreviewService : IDisposable
 
             var compCB = new CompositeCB
             {
-                BlendMode   = (uint)layer.BlendMode,
+                BlendMode = (uint)layer.BlendMode,
                 IsNormalMap = layer.AffectsNormal ? 1u : 0u,
             };
-            pipeline.DispatchComposite(
-                accumSRV,
-                dilatedSRV,
-                compositedUAV,
-                compCB,
-                mapWidth, mapHeight);
+            pipeline.DispatchComposite(accumSRV, dilatedSRV, compositedUAV, compCB, mapWidth, mapHeight);
 
-            // 用新合成结果替换 accum（释放旧 accum 资源）
             accumUAV->Release();
             accumSRV->Release();
             accumTex->Release();
@@ -283,7 +270,6 @@ public unsafe class PreviewService : IDisposable
             accumSRV = compositedSRV!;
             accumUAV = compositedUAV!;
 
-            // 所有权已移交，防止 finally 中重复释放
             compositedTex = null;
             compositedSRV = null;
             compositedUAV = null;
@@ -293,9 +279,9 @@ public unsafe class PreviewService : IDisposable
             if (projBufUAV != null) projBufUAV->Release();
             if (projBufSRV != null) projBufSRV->Release();
             if (projBufTex != null) projBufTex->Release();
-            if (dilatedUAV  != null) dilatedUAV->Release();
-            if (dilatedSRV  != null) dilatedSRV->Release();
-            if (dilatedTex  != null) dilatedTex->Release();
+            if (dilatedUAV != null) dilatedUAV->Release();
+            if (dilatedSRV != null) dilatedSRV->Release();
+            if (dilatedTex != null) dilatedTex->Release();
             if (compositedUAV != null) compositedUAV->Release();
             if (compositedSRV != null) compositedSRV->Release();
             if (compositedTex != null) compositedTex->Release();
@@ -304,16 +290,13 @@ public unsafe class PreviewService : IDisposable
         }
     }
 
-    // 创建一个可同时用作 SRV/UAV 的 RGBA float32 贴图
     private ID3D11Texture2D* CreateFloatRWTexture()
     {
-        return dx.CreateTexture2D(
-            mapWidth, mapHeight,
+        return dx.CreateTexture2D(mapWidth, mapHeight,
             DXGI_FORMAT_R32G32B32A32_FLOAT,
             (uint)(D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS));
     }
 
-    // 将 RGBA8 字节数组线性转换为 [0,1] float4 数组
     private static float[] ConvertRgba8ToFloat4(byte[] data, int w, int h)
     {
         var result = new float[w * h * 4];
@@ -327,8 +310,8 @@ public unsafe class PreviewService : IDisposable
     {
         if (positionMapSRV != null) { positionMapSRV->Release(); positionMapSRV = null; }
         if (positionMapTex != null) { positionMapTex->Release(); positionMapTex = null; }
-        if (normalMapSRV   != null) { normalMapSRV->Release();   normalMapSRV   = null; }
-        if (normalMapTex   != null) { normalMapTex->Release();   normalMapTex   = null; }
+        if (normalMapSRV != null) { normalMapSRV->Release(); normalMapSRV = null; }
+        if (normalMapTex != null) { normalMapTex->Release(); normalMapTex = null; }
     }
 
     public void Dispose()

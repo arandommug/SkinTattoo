@@ -17,6 +17,7 @@ public class PenumbraBridge : IDisposable
     private readonly AddTemporaryMod addTempMod;
     private readonly RedrawObject redrawObject;
     private readonly ResolvePlayerPath resolvePlayerPath;
+    private readonly GetPlayerResourcePaths getPlayerResourcePaths;
 
     private Guid collectionId = Guid.Empty;
     private const string Identity = "SkinTatoo";
@@ -35,6 +36,7 @@ public class PenumbraBridge : IDisposable
         addTempMod        = new AddTemporaryMod(pluginInterface);
         redrawObject      = new RedrawObject(pluginInterface);
         resolvePlayerPath = new ResolvePlayerPath(pluginInterface);
+        getPlayerResourcePaths = new GetPlayerResourcePaths(pluginInterface);
 
         CheckAvailability();
     }
@@ -114,6 +116,17 @@ public class PenumbraBridge : IDisposable
         catch (Exception ex)
         {
             log.Error(ex, "Failed to resolve player path");
+            return null;
+        }
+    }
+
+    public Dictionary<ushort, Dictionary<string, HashSet<string>>>? GetPlayerResources()
+    {
+        if (!IsAvailable) return null;
+        try { return getPlayerResourcePaths.Invoke(); }
+        catch (Exception ex)
+        {
+            log.Error(ex, "Failed to get player resource paths");
             return null;
         }
     }

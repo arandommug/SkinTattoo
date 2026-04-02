@@ -2,3 +2,9 @@
 	path = Penumbra.Api
 	url = https://github.com/MeowZWR/Penumbra.Api.git
 	branch = cn-temp
+[submodule "Lumina"]
+	path = Lumina
+	url = https://github.com/AtmoOmen/Lumina.git
+[submodule "Meddle"]
+	path = Meddle
+	url = https://github.com/PassiveModding/Meddle.git

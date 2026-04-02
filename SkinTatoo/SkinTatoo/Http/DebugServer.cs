@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Linq;
 using System.Numerics;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Dalamud.Plugin.Services;
 using EmbedIO;
 using EmbedIO.Routing;
 using EmbedIO.WebApi;
@@ -23,14 +25,14 @@ public class DebugServer : IDisposable
     private readonly DecalProject _project;
     private readonly PenumbraBridge _penumbra;
     private readonly PreviewService _preview;
+    private readonly IDataManager _dataManager;
 
-    // Static log buffer shared across the whole plugin
     public static readonly ConcurrentQueue<string> LogBuffer = new();
     private const int MaxLogEntries = 200;
 
     public static void AppendLog(string message)
     {
-        LogBuffer.Enqueue($"[{DateTime.UtcNow:HH:mm:ss.fff}] {message}");
+        LogBuffer.Enqueue($"[{DateTime.Now:HH:mm:ss.fff}] {message}");
         while (LogBuffer.Count > MaxLogEntries)
             LogBuffer.TryDequeue(out _);
     }
@@ -39,12 +41,14 @@ public class DebugServer : IDisposable
         Configuration config,
         DecalProject project,
         PenumbraBridge penumbra,
-        PreviewService preview)
+        PreviewService preview,
+        IDataManager dataManager)
     {
         _config   = config;
         _project  = project;
         _penumbra = penumbra;
         _preview  = preview;
+        _dataManager = dataManager;
     }
 
     public void Start()
@@ -56,7 +60,7 @@ public class DebugServer : IDisposable
             .WithUrlPrefix(url)
             .WithMode(HttpListenerMode.EmbedIO))
             .WithWebApi("/api", m => m.WithController(() =>
-                new ApiController(_project, _penumbra, _preview, _config)));
+                new ApiController(_project, _penumbra, _preview, _config, _dataManager)));
 
         // RunAsync returns a Task — fire and forget, errors go to AppendLog
         _ = _server.RunAsync(_cts.Token).ContinueWith(t =>
@@ -86,6 +90,7 @@ internal sealed class ApiController : WebApiController
     private readonly PenumbraBridge _penumbra;
     private readonly PreviewService _preview;
     private readonly Configuration _config;
+    private readonly IDataManager _dataManager;
 
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
@@ -96,12 +101,14 @@ internal sealed class ApiController : WebApiController
         DecalProject project,
         PenumbraBridge penumbra,
         PreviewService preview,
-        Configuration config)
+        Configuration config,
+        IDataManager dataManager)
     {
         _project  = project;
         _penumbra = penumbra;
         _preview  = preview;
         _config   = config;
+        _dataManager = dataManager;
     }
 
     // ── GET /api/status ───────────────────────────────────────────────────────
@@ -203,8 +210,8 @@ internal sealed class ApiController : WebApiController
             catch { }
         }
 
-        await _preview.UpdatePreview(_project, texPath);
-        return new { ok = true };
+        var result = _preview.UpdatePreview(_project, texPath);
+        return new { ok = result != null, outputPath = result };
     }
 
     // ── POST /api/mesh/load ───────────────────────────────────────────────────
@@ -233,8 +240,15 @@ internal sealed class ApiController : WebApiController
             return new { error = "Missing 'path' field" };
         }
 
-        await _preview.LoadMesh(path!);
-        return new { ok = true, path };
+        var ok = _preview.LoadMesh(path!);
+        var mesh = _preview.CurrentMesh;
+        return new
+        {
+            ok,
+            path,
+            triangles = mesh?.TriangleCount ?? 0,
+            vertices = mesh?.Vertices.Length ?? 0,
+        };
     }
 
     // ── GET /api/mesh/info ────────────────────────────────────────────────────
@@ -259,6 +273,70 @@ internal sealed class ApiController : WebApiController
     {
         entries = DebugServer.LogBuffer.ToArray(),
     };
+
+    // ── GET /api/filecheck?path=xxx ──────────────────────────────────────────
+    [Route(HttpVerbs.Get, "/filecheck")]
+    public object GetFileCheck()
+    {
+        var path = HttpContext.GetRequestQueryData()["path"];
+        if (string.IsNullOrEmpty(path))
+            return new { error = "missing ?path= parameter" };
+
+        var exists = _dataManager.FileExists(path);
+        string? resolvedPath = null;
+        try
+        {
+            var resolved = _penumbra.ResolvePlayer(path);
+            resolvedPath = resolved;
+        }
+        catch { }
+
+        object? rawInfo = null;
+        if (exists)
+        {
+            try
+            {
+                var raw = _dataManager.GetFile(path);
+                rawInfo = new { size = raw?.Data.Length ?? 0 };
+            }
+            catch (Exception ex)
+            {
+                rawInfo = new { error = ex.Message };
+            }
+        }
+
+        return new
+        {
+            path,
+            exists,
+            penumbraResolved = resolvedPath,
+            rawFile = rawInfo,
+            gameDataPath = _dataManager.GameData.DataPath.FullName,
+        };
+    }
+
+    // ── GET /api/player/resources ───────────────────────────────────────────
+    [Route(HttpVerbs.Get, "/player/resources")]
+    public object GetPlayerResources()
+    {
+        var resources = _penumbra.GetPlayerResources();
+        if (resources == null)
+            return new { error = "Penumbra not available or no player resources" };
+
+        var result = new Dictionary<string, object>();
+        foreach (var (objIdx, paths) in resources)
+        {
+            var filtered = new Dictionary<string, string[]>();
+            foreach (var (gamePath, resolvedPaths) in paths)
+            {
+                if (gamePath.Contains(".mdl") || gamePath.Contains(".tex") || gamePath.Contains(".mtrl"))
+                    filtered[gamePath] = resolvedPaths.ToArray();
+            }
+            if (filtered.Count > 0)
+                result[$"obj_{objIdx}"] = filtered;
+        }
+        return result;
+    }
 
     // ── helpers ───────────────────────────────────────────────────────────────
 
