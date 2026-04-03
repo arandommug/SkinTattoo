@@ -10,6 +10,8 @@ using Dalamud.Interface.ImGuiFileDialog;
 using Dalamud.Interface.Utility.Raii;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin.Services;
+using Penumbra.Api.Enums;
+using Penumbra.Api.Helpers;
 using SkinTatoo.Core;
 using SkinTatoo.Http;
 using SkinTatoo.Interop;
@@ -29,28 +31,30 @@ public class MainWindow : Window, IDisposable
     private string imagePathBuf = string.Empty;
     private int lastEditedLayerIndex = -1;
     private int layerCounter;
-    private string meshLoadStatus = "";
     private bool scaleLocked = true;
 
     // Resource browser state
-    private List<ResourceGroup>? cachedGroups;
+    private Dictionary<ushort, ResourceTreeDto>? cachedTrees;
     private bool resourceWindowOpen;
+    private bool treeExpandRequest;
+    private bool treeCollapseRequest;
 
     // Canvas state
     private float canvasZoom = 1.0f;
     private Vector2 canvasPan = Vector2.Zero;
     private bool canvasDraggingLayer;
     private bool canvasPanning;
-    private bool canvasScalingLayer; // right-drag scale
+    private bool canvasScalingLayer;
     private bool showHelpWindow;
 
-    // Auto-preview debounce: delay after last change
+    // Auto-preview debounce
     private bool previewDirty;
     private DateTime lastDirtyTime = DateTime.MinValue;
     private const double PreviewDebounceSec = 0.8;
 
     private static readonly string[] BlendModeNames = ["正常", "正片叠底", "叠加", "柔光"];
     private static readonly BlendMode[] BlendModeValues = [BlendMode.Normal, BlendMode.Multiply, BlendMode.Overlay, BlendMode.SoftLight];
+    private static readonly string[] EmissiveMaskNames = ["均匀", "中心扩散", "边缘光环", "边缘描边"];
 
     public DebugWindow? DebugWindowRef { get; set; }
     public event Action? OnSaveRequested;
@@ -122,7 +126,7 @@ public class MainWindow : Window, IDisposable
         ImGui.Spacing();
         ImGui.TextColored(new Vector4(1f, 0.8f, 0.3f, 1f), "图层");
         ImGui.Separator();
-        ImGui.BulletText("Ctrl+Shift + 删除按钮: 删除图层");
+        ImGui.BulletText("Ctrl+Shift + 删除按钮: 删除图层/目标");
 
         ImGui.Spacing();
         ImGui.TextColored(new Vector4(1f, 0.8f, 0.3f, 1f), "参数面板");
@@ -155,7 +159,7 @@ public class MainWindow : Window, IDisposable
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("重置当前图层参数");
 
         ImGui.SameLine();
-        using (ImRaii.Disabled(string.IsNullOrEmpty(config.TargetTextureGamePath)))
+        using (ImRaii.Disabled(project.Groups.Count == 0))
         {
             if (ImGuiComponents.IconButton(3, FontAwesomeIcon.Eraser))
             {
@@ -170,14 +174,10 @@ public class MainWindow : Window, IDisposable
         ImGui.SameLine();
         ImGui.Spacing();
         ImGui.SameLine();
-        var gpuColor = previewService.IsReady ? new Vector4(0, 1, 0.3f, 1) : new Vector4(1, 0.3f, 0.3f, 1);
         var penColor = penumbra.IsAvailable ? new Vector4(0, 1, 0.3f, 1) : new Vector4(1, 0.8f, 0, 1);
-        ImGui.TextColored(gpuColor, previewService.IsReady ? "● GPU" : "GPU [x]");
-        ImGui.SameLine();
         ImGui.TextColored(penColor, penumbra.IsAvailable ? "● Penumbra" : "Penumbra [x]");
     }
 
-    /// <summary>Three-panel layout: left=layers, center=canvas, right=parameters.</summary>
     private void DrawThreePanelLayout(float totalWidth, float height)
     {
         var leftWidth = totalWidth * 0.20f;
@@ -205,133 +205,160 @@ public class MainWindow : Window, IDisposable
         }
     }
 
-    // ── Left Panel: Layer list ────────────────────────────────────────────────
+    // ── Left Panel: Tree structure ───────────────────────────────────────────
 
     private void DrawLayerPanel()
     {
-        ImGui.TextDisabled("投影目标");
-        DrawTargetSelector();
+        // Group-level buttons
+        if (ImGuiComponents.IconButton(10, FontAwesomeIcon.Plus))
+        {
+            resourceWindowOpen = true;
+            RefreshResources();
+        }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("添加投影目标");
+
+        ImGui.SameLine();
+        var io = ImGui.GetIO();
+        var canDeleteGroup = project.SelectedGroupIndex >= 0 && io.KeyCtrl && io.KeyShift;
+        using (ImRaii.Disabled(!canDeleteGroup))
+        {
+            if (ImGuiComponents.IconButton(11, FontAwesomeIcon.Trash))
+            {
+                project.RemoveGroup(project.SelectedGroupIndex);
+                MarkPreviewDirty();
+            }
+        }
+        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+            ImGui.SetTooltip("按住 Ctrl+Shift 删除投影目标");
+
+        ImGui.SameLine();
+        ImGui.TextDisabled($"({project.Groups.Count})");
 
         ImGui.Separator();
 
-        if (ImGuiComponents.IconButton(10, FontAwesomeIcon.Plus))
+        using var listChild = ImRaii.Child("##GroupTree", new Vector2(-1, -1), false);
+        if (!listChild.Success) return;
+
+        for (var gi = 0; gi < project.Groups.Count; gi++)
         {
+            ImGui.PushID(gi);
+            DrawGroupNode(gi);
+            ImGui.PopID();
+        }
+
+        if (project.Groups.Count == 0)
+            ImGui.TextDisabled("点击 + 添加投影目标");
+    }
+
+    private void DrawGroupNode(int gi)
+    {
+        var group = project.Groups[gi];
+        var isGroupSelected = project.SelectedGroupIndex == gi;
+
+        var flags = ImGuiTreeNodeFlags.OpenOnArrow | ImGuiTreeNodeFlags.SpanAvailWidth;
+        if (isGroupSelected && group.SelectedLayerIndex < 0) flags |= ImGuiTreeNodeFlags.Selected;
+        if (group.IsExpanded) flags |= ImGuiTreeNodeFlags.DefaultOpen;
+
+        var open = ImGui.TreeNodeEx($"{group.Name}##grp", flags);
+        group.IsExpanded = open;
+
+        if (ImGui.IsItemClicked(ImGuiMouseButton.Left) && !ImGui.IsItemToggledOpen())
+        {
+            project.SelectedGroupIndex = gi;
+            group.SelectedLayerIndex = -1;
+        }
+
+        // Tooltip with target info
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.BeginTooltip();
+            if (!string.IsNullOrEmpty(group.DiffuseGamePath))
+                ImGui.Text($"贴图: {group.DiffuseGamePath}");
+            if (!string.IsNullOrEmpty(group.NormGamePath))
+                ImGui.Text($"法线: {group.NormGamePath}");
+            if (!string.IsNullOrEmpty(group.MtrlGamePath))
+                ImGui.Text($"材质: {group.MtrlGamePath}");
+            ImGui.EndTooltip();
+        }
+
+        if (!open) return;
+
+        // Layer buttons within group
+        if (ImGuiComponents.IconButton(20, FontAwesomeIcon.Plus))
+        {
+            project.SelectedGroupIndex = gi;
             layerCounter++;
-            project.AddLayer($"贴花 {layerCounter}");
+            group.AddLayer($"贴花 {layerCounter}");
         }
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("添加图层");
 
         ImGui.SameLine();
         var io = ImGui.GetIO();
-        var canDelete = project.SelectedLayerIndex >= 0 && project.Layers.Count > 0
-                        && io.KeyCtrl && io.KeyShift;
-        using (ImRaii.Disabled(!canDelete))
+        var canDeleteLayer = isGroupSelected && group.SelectedLayerIndex >= 0
+                             && io.KeyCtrl && io.KeyShift;
+        using (ImRaii.Disabled(!canDeleteLayer))
         {
-            if (ImGuiComponents.IconButton(11, FontAwesomeIcon.Trash))
-                project.RemoveLayer(project.SelectedLayerIndex);
+            if (ImGuiComponents.IconButton(21, FontAwesomeIcon.Trash))
+                group.RemoveLayer(group.SelectedLayerIndex);
         }
         if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-            ImGui.SetTooltip("按住 Ctrl+Shift 激活删除");
+            ImGui.SetTooltip("按住 Ctrl+Shift 删除图层");
 
         ImGui.SameLine();
-        using (ImRaii.Disabled(project.SelectedLayerIndex <= 0))
+        using (ImRaii.Disabled(!isGroupSelected || group.SelectedLayerIndex <= 0))
         {
-            if (ImGuiComponents.IconButton(12, FontAwesomeIcon.ArrowUp))
+            if (ImGuiComponents.IconButton(22, FontAwesomeIcon.ArrowUp))
             {
-                project.MoveLayerUp(project.SelectedLayerIndex);
-                SyncImagePathBuf(project.SelectedLayerIndex);
+                group.MoveLayerUp(group.SelectedLayerIndex);
+                SyncImagePathBuf();
             }
         }
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("上移图层");
 
         ImGui.SameLine();
-        using (ImRaii.Disabled(project.SelectedLayerIndex < 0 || project.SelectedLayerIndex >= project.Layers.Count - 1))
+        using (ImRaii.Disabled(!isGroupSelected || group.SelectedLayerIndex < 0 || group.SelectedLayerIndex >= group.Layers.Count - 1))
         {
-            if (ImGuiComponents.IconButton(13, FontAwesomeIcon.ArrowDown))
+            if (ImGuiComponents.IconButton(23, FontAwesomeIcon.ArrowDown))
             {
-                project.MoveLayerDown(project.SelectedLayerIndex);
-                SyncImagePathBuf(project.SelectedLayerIndex);
+                group.MoveLayerDown(group.SelectedLayerIndex);
+                SyncImagePathBuf();
             }
         }
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("下移图层");
 
         ImGui.SameLine();
-        ImGui.TextDisabled($"({project.Layers.Count})");
+        ImGui.TextDisabled($"({group.Layers.Count})");
 
-        ImGui.Separator();
-
-        using var listChild = ImRaii.Child("##LayerList", new Vector2(-1, -1), false);
-        if (!listChild.Success) return;
-
-        for (var i = 0; i < project.Layers.Count; i++)
+        // Layer list
+        for (var li = 0; li < group.Layers.Count; li++)
         {
-            var layer = project.Layers[i];
-            ImGui.PushID(i);
+            var layer = group.Layers[li];
+            ImGui.PushID(li + 1000);
 
             var visIcon = layer.IsVisible ? FontAwesomeIcon.Eye : FontAwesomeIcon.EyeSlash;
             var visColor = layer.IsVisible ? new Vector4(1, 1, 1, 1) : new Vector4(0.5f, 0.5f, 0.5f, 1);
             ImGui.PushStyleColor(ImGuiCol.Text, visColor);
-            if (ImGuiComponents.IconButton(100 + i, visIcon))
+            if (ImGuiComponents.IconButton(100 + li, visIcon))
                 layer.IsVisible = !layer.IsVisible;
             ImGui.PopStyleColor();
             ImGui.SameLine();
 
-            var isSelected = project.SelectedLayerIndex == i;
-            if (ImGui.Selectable(layer.Name, isSelected))
+            var isLayerSelected = isGroupSelected && group.SelectedLayerIndex == li;
+            if (ImGui.Selectable(layer.Name, isLayerSelected))
             {
-                project.SelectedLayerIndex = i;
-                SyncImagePathBuf(i);
+                project.SelectedGroupIndex = gi;
+                group.SelectedLayerIndex = li;
+                SyncImagePathBuf();
             }
 
             ImGui.PopID();
         }
+
+        ImGui.TreePop();
     }
 
-    private void DrawTargetSelector()
-    {
-        var hasDiffuse = !string.IsNullOrEmpty(config.TargetTextureGamePath);
-
-        if (hasDiffuse)
-        {
-            var fileName = Path.GetFileName(config.TargetTextureGamePath);
-            ImGui.TextColored(new Vector4(0.3f, 1f, 0.5f, 1f), $"  {fileName}");
-            if (ImGui.IsItemHovered())
-            {
-                ImGui.BeginTooltip();
-                ImGui.Text($"贴图: {config.TargetTextureGamePath}");
-                if (!string.IsNullOrEmpty(config.TargetNormGamePath))
-                    ImGui.Text($"法线: {config.TargetNormGamePath}");
-                if (!string.IsNullOrEmpty(config.TargetMaskGamePath))
-                    ImGui.Text($"遮罩: {config.TargetMaskGamePath}");
-                if (!string.IsNullOrEmpty(config.TargetMeshDiskPath))
-                    ImGui.Text($"网格: {Path.GetFileName(config.TargetMeshDiskPath)}");
-                ImGui.EndTooltip();
-            }
-
-            var normOk = !string.IsNullOrEmpty(config.TargetNormGamePath);
-            var maskOk = !string.IsNullOrEmpty(config.TargetMaskGamePath);
-            var meshOk = previewService.CurrentMesh != null;
-            if (normOk) { ImGui.SameLine(); ImGui.TextColored(new Vector4(0.5f, 0.5f, 1f, 0.7f), "N"); }
-            if (maskOk) { ImGui.SameLine(); ImGui.TextColored(new Vector4(1f, 0.8f, 0.3f, 0.7f), "M"); }
-            if (meshOk) { ImGui.SameLine(); ImGui.TextColored(new Vector4(0.3f, 0.7f, 1f, 0.7f), "▲"); }
-        }
-        else
-        {
-            ImGui.TextColored(new Vector4(1, 0.5f, 0.3f, 1), "  未选择目标");
-        }
-
-        if (ImGui.Button("选择投影目标...", new Vector2(-1, 22)))
-        {
-            resourceWindowOpen = true;
-            RefreshResources();
-        }
-    }
-
-    // ── Center Panel: Interactive UV Canvas ───────────────────────────────────
+    // ── Center Panel: Interactive UV Canvas ──────────────────────────────────
 
     private void DrawCanvas()
     {
-        // Canvas toolbar
         var btnH = ImGui.GetFrameHeight();
         ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 80);
         ImGui.SliderFloat("##zoom", ref canvasZoom, 0.1f, 5.0f, $"{canvasZoom * 100:F0}%%");
@@ -352,43 +379,30 @@ public class MainWindow : Window, IDisposable
         if (canvasSize.X < 10 || canvasSize.Y < 10) return;
 
         var canvasPos = ImGui.GetCursorScreenPos();
-
-        // Fit UV square into canvas area
         var fitSize = MathF.Min(canvasSize.X, canvasSize.Y) * canvasZoom;
         var uvOrigin = canvasPos + (canvasSize - new Vector2(fitSize)) * 0.5f
                        - canvasPan * fitSize;
 
-        // Interaction area
         ImGui.InvisibleButton("##Canvas", canvasSize);
         var isHovered = ImGui.IsItemHovered();
         var drawList = ImGui.GetWindowDrawList();
 
-        // Clip to canvas
         drawList.PushClipRect(canvasPos, canvasPos + canvasSize, true);
 
-        // Background
         drawList.AddRectFilled(canvasPos, canvasPos + canvasSize,
             ImGui.GetColorU32(new Vector4(0.1f, 0.1f, 0.1f, 1f)));
 
-        // Checkerboard pattern for UV area
         DrawCheckerboard(drawList, uvOrigin, fitSize);
-
-        // Draw base texture
         DrawBaseTexture(drawList, uvOrigin, fitSize);
-
-        // Draw layer overlays
         DrawLayerOverlays(drawList, uvOrigin, fitSize);
 
-        // UV border
         drawList.AddRect(uvOrigin, uvOrigin + new Vector2(fitSize),
             ImGui.GetColorU32(new Vector4(0.4f, 0.4f, 0.4f, 1f)));
 
-        // Rulers
         DrawRulers(drawList, canvasPos, canvasSize, uvOrigin, fitSize);
 
         drawList.PopClipRect();
 
-        // Handle mouse interaction
         if (isHovered)
             HandleCanvasInput(canvasPos, canvasSize, uvOrigin, fitSize);
     }
@@ -404,7 +418,6 @@ public class MainWindow : Window, IDisposable
             var t = i / (float)divisions;
             var label = $"{t:F1}";
 
-            // Horizontal ruler (top edge)
             var hx = uvOrigin.X + t * fitSize;
             if (hx >= canvasPos.X && hx <= canvasPos.X + canvasSize.X)
             {
@@ -414,7 +427,6 @@ public class MainWindow : Window, IDisposable
                     drawList.AddText(new Vector2(hx + 2, uvOrigin.Y - 16), textColor, label);
             }
 
-            // Vertical ruler (left edge)
             var vy = uvOrigin.Y + t * fitSize;
             if (vy >= canvasPos.Y && vy <= canvasPos.Y + canvasSize.Y)
             {
@@ -440,7 +452,6 @@ public class MainWindow : Window, IDisposable
             {
                 var pMin = origin + new Vector2(x * checkerSize, y * checkerSize);
                 var pMax = pMin + new Vector2(checkerSize);
-                // Clamp to UV area
                 pMin = Vector2.Max(pMin, origin);
                 pMax = Vector2.Min(pMax, origin + new Vector2(size));
                 if (pMin.X >= pMax.X || pMin.Y >= pMax.Y) continue;
@@ -453,14 +464,18 @@ public class MainWindow : Window, IDisposable
 
     private void DrawBaseTexture(ImDrawListPtr drawList, Vector2 uvOrigin, float fitSize)
     {
-        var texPath = config.TargetTextureDiskPath;
-        if (string.IsNullOrEmpty(texPath)) return;
+        var group = project.SelectedGroup;
+        if (group == null) return;
+
+        var texDiskPath = group.DiffuseDiskPath;
+        var texGamePath = group.DiffuseGamePath;
+        if (string.IsNullOrEmpty(texDiskPath) && string.IsNullOrEmpty(texGamePath)) return;
 
         try
         {
-            var shared = File.Exists(texPath)
-                ? textureProvider.GetFromFile(texPath)
-                : textureProvider.GetFromGame(config.TargetTextureGamePath ?? "");
+            var shared = !string.IsNullOrEmpty(texDiskPath) && File.Exists(texDiskPath)
+                ? textureProvider.GetFromFile(texDiskPath)
+                : textureProvider.GetFromGame(texGamePath ?? "");
             var wrap = shared.GetWrapOrDefault();
             if (wrap != null)
             {
@@ -474,20 +489,20 @@ public class MainWindow : Window, IDisposable
 
     private void DrawLayerOverlays(ImDrawListPtr drawList, Vector2 uvOrigin, float fitSize)
     {
-        for (var i = 0; i < project.Layers.Count; i++)
+        var group = project.SelectedGroup;
+        if (group == null) return;
+
+        for (var i = 0; i < group.Layers.Count; i++)
         {
-            var layer = project.Layers[i];
+            var layer = group.Layers[i];
             if (!layer.IsVisible || string.IsNullOrEmpty(layer.ImagePath)) continue;
 
-            var isSelected = project.SelectedLayerIndex == i;
+            var isSelected = group.SelectedLayerIndex == i;
             var center = layer.UvCenter;
             var scale = layer.UvScale;
-
-            // Layer bounds in canvas pixels
             var pCenter = uvOrigin + center * fitSize;
             var pHalfSize = scale * fitSize * 0.5f;
 
-            // Draw decal image if available
             try
             {
                 if (File.Exists(layer.ImagePath))
@@ -498,7 +513,6 @@ public class MainWindow : Window, IDisposable
                         var pMin = pCenter - pHalfSize;
                         var pMax = pCenter + pHalfSize;
 
-                        // Handle rotation: if no rotation, draw simple image
                         if (MathF.Abs(layer.RotationDeg) < 0.1f)
                         {
                             var alpha = (uint)(layer.Opacity * 255) << 24 | 0x00FFFFFF;
@@ -507,7 +521,6 @@ public class MainWindow : Window, IDisposable
                         }
                         else
                         {
-                            // For rotated, draw with 4-corner UV mapping
                             var rotRad = layer.RotationDeg * (MathF.PI / 180f);
                             var cos = MathF.Cos(rotRad);
                             var sin = MathF.Sin(rotRad);
@@ -532,7 +545,7 @@ public class MainWindow : Window, IDisposable
             }
             catch { }
 
-            // Draw bounding box
+            // Bounding box
             var borderColor = isSelected
                 ? ImGui.GetColorU32(new Vector4(1f, 0.8f, 0.2f, 1f))
                 : ImGui.GetColorU32(new Vector4(0.6f, 0.6f, 0.6f, 0.5f));
@@ -559,7 +572,6 @@ public class MainWindow : Window, IDisposable
                 drawList.AddQuad(tl, tr, br, bl, borderColor, thickness);
             }
 
-            // Center crosshair for selected
             if (isSelected)
             {
                 var cross = 6f;
@@ -573,14 +585,13 @@ public class MainWindow : Window, IDisposable
     {
         var io = ImGui.GetIO();
         var mousePos = io.MousePos;
-        var selectedLayer = project.SelectedLayer;
+        var group = project.SelectedGroup;
+        var selectedLayer = group?.SelectedLayer;
         var hasActiveLayer = selectedLayer != null && !string.IsNullOrEmpty(selectedLayer.ImagePath);
 
-        // ── Scroll wheel: always canvas zoom ──
         if (MathF.Abs(io.MouseWheel) > 0.01f)
             canvasZoom = Math.Clamp(canvasZoom + io.MouseWheel * 0.15f * canvasZoom, 0.1f, 10f);
 
-        // ── Middle mouse: pan canvas ──
         if (ImGui.IsMouseDragging(ImGuiMouseButton.Middle))
         {
             canvasPanning = true;
@@ -591,8 +602,7 @@ public class MainWindow : Window, IDisposable
             canvasPanning = false;
         }
 
-        // ── Right mouse drag: scale selected layer ──
-        if (hasActiveLayer)
+        if (hasActiveLayer && group != null)
         {
             if (ImGui.IsMouseClicked(ImGuiMouseButton.Right))
             {
@@ -608,13 +618,11 @@ public class MainWindow : Window, IDisposable
 
                 if (io.KeyAlt)
                 {
-                    // Alt + right drag: rotate
                     var rotDelta = -delta.Y * 0.5f;
                     selectedLayer!.RotationDeg = Math.Clamp(selectedLayer.RotationDeg + rotDelta, -180f, 180f);
                 }
                 else
                 {
-                    // Right drag: scale
                     var scaleDelta = delta.X * 0.003f;
                     if (scaleLocked)
                     {
@@ -635,13 +643,11 @@ public class MainWindow : Window, IDisposable
                 canvasScalingLayer = false;
         }
 
-        // ── Left mouse: drag layer position ──
-        if (!canvasPanning && !canvasScalingLayer)
+        if (!canvasPanning && !canvasScalingLayer && group != null)
         {
             if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
             {
                 canvasDraggingLayer = false;
-                // Try current selected layer first
                 if (hasActiveLayer)
                 {
                     var pCenter = uvOrigin + selectedLayer!.UvCenter * fitSize;
@@ -650,20 +656,19 @@ public class MainWindow : Window, IDisposable
                                          mousePos.Y >= pCenter.Y - pHalfSize.Y && mousePos.Y <= pCenter.Y + pHalfSize.Y;
                 }
 
-                // Try pick another layer
                 if (!canvasDraggingLayer)
                 {
-                    for (var i = project.Layers.Count - 1; i >= 0; i--)
+                    for (var i = group.Layers.Count - 1; i >= 0; i--)
                     {
-                        var l = project.Layers[i];
+                        var l = group.Layers[i];
                         if (!l.IsVisible || string.IsNullOrEmpty(l.ImagePath)) continue;
                         var lc = uvOrigin + l.UvCenter * fitSize;
                         var lh = l.UvScale * fitSize * 0.5f;
                         if (mousePos.X >= lc.X - lh.X && mousePos.X <= lc.X + lh.X &&
                             mousePos.Y >= lc.Y - lh.Y && mousePos.Y <= lc.Y + lh.Y)
                         {
-                            project.SelectedLayerIndex = i;
-                            SyncImagePathBuf(i);
+                            group.SelectedLayerIndex = i;
+                            SyncImagePathBuf();
                             canvasDraggingLayer = true;
                             break;
                         }
@@ -671,12 +676,11 @@ public class MainWindow : Window, IDisposable
                 }
             }
 
-            if (canvasDraggingLayer && ImGui.IsMouseDragging(ImGuiMouseButton.Left) && project.SelectedLayer != null)
+            if (canvasDraggingLayer && ImGui.IsMouseDragging(ImGuiMouseButton.Left) && group.SelectedLayer != null)
             {
-                var layer = project.SelectedLayer;
+                var layer = group.SelectedLayer;
                 var delta = io.MouseDelta / fitSize;
 
-                // Shift: lock X axis (only move Y), Ctrl: lock Y axis (only move X)
                 if (io.KeyShift) delta.X = 0;
                 if (io.KeyCtrl) delta.Y = 0;
 
@@ -690,7 +694,6 @@ public class MainWindow : Window, IDisposable
                 canvasDraggingLayer = false;
         }
 
-        // ── Cursor ──
         if (canvasDraggingLayer)
             ImGui.SetMouseCursor(ImGuiMouseCursor.ResizeAll);
         else if (canvasScalingLayer)
@@ -698,7 +701,6 @@ public class MainWindow : Window, IDisposable
         else if (canvasPanning)
             ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
 
-        // ── Status bar ──
         var mouseUv = (mousePos - uvOrigin) / fitSize;
         if (mouseUv.X >= 0 && mouseUv.X <= 1 && mouseUv.Y >= 0 && mouseUv.Y <= 1)
         {
@@ -714,22 +716,26 @@ public class MainWindow : Window, IDisposable
         }
     }
 
-    // ── Right Panel: Parameters ───────────────────────────────────────────────
+    // ── Right Panel: Parameters ──────────────────────────────────────────────
 
     private void DrawParameterPanel()
     {
-        var layer = project.SelectedLayer;
+        var group = project.SelectedGroup;
+        var layer = group?.SelectedLayer;
         if (layer == null)
         {
-            ImGui.TextDisabled("选择一个图层");
+            if (group != null)
+                ImGui.TextDisabled("选择或添加一个图层");
+            else
+                ImGui.TextDisabled("先添加一个投影目标");
             ImGui.Separator();
             DrawActionsSection();
             return;
         }
 
-        var idx = project.SelectedLayerIndex;
+        var idx = group!.SelectedLayerIndex;
         if (lastEditedLayerIndex != idx)
-            SyncImagePathBuf(idx);
+            SyncImagePathBuf();
 
         ImGui.SetNextItemWidth(-1);
         var name = layer.Name;
@@ -749,21 +755,25 @@ public class MainWindow : Window, IDisposable
             ImGui.SameLine();
             if (ImGuiComponents.IconButton(20, FontAwesomeIcon.FolderOpen))
             {
-                var capturedIdx = idx;
+                var capturedGi = project.SelectedGroupIndex;
+                var capturedLi = idx;
                 fileDialog.OpenFileDialog(
                     "选择贴花图片",
                     "图片文件{.png,.jpg,.jpeg,.tga,.bmp,.dds}",
                     (ok, paths) =>
                     {
-                        if (ok && paths.Count > 0 && capturedIdx < project.Layers.Count)
+                        if (ok && paths.Count > 0 && capturedGi < project.Groups.Count)
                         {
-                            var path = paths[0];
-                            project.Layers[capturedIdx].ImagePath = path;
-                            imagePathBuf = path;
-                            lastEditedLayerIndex = capturedIdx;
-                            // Remember directory
-                            config.LastImageDir = Path.GetDirectoryName(path);
-                            config.Save();
+                            var g = project.Groups[capturedGi];
+                            if (capturedLi < g.Layers.Count)
+                            {
+                                var path = paths[0];
+                                g.Layers[capturedLi].ImagePath = path;
+                                imagePathBuf = path;
+                                lastEditedLayerIndex = capturedLi;
+                                config.LastImageDir = Path.GetDirectoryName(path);
+                                config.Save();
+                            }
                         }
                     },
                     1, config.LastImageDir, false);
@@ -782,7 +792,6 @@ public class MainWindow : Window, IDisposable
                 if (ImGui.DragFloat2("##中心", ref center, 0.005f, 0f, 1f, "%.3f"))
                 { layer.UvCenter = center; MarkPreviewDirty(); }
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("中心点 ");
-                // Scroll adjust for center.X (DragFloat2 hover covers both)
                 {
                     var cx = layer.UvCenter.X; var cy = layer.UvCenter.Y;
                     if (ScrollAdjust(ref cx, 0.001f, 0f, 1f))
@@ -840,27 +849,49 @@ public class MainWindow : Window, IDisposable
                 if (ImGui.Checkbox("贴图", ref affDiff))
                 { layer.AffectsDiffuse = affDiff; MarkPreviewDirty(); }
                 ImGui.SameLine();
-                var affMask = layer.AffectsMask;
-                if (ImGui.Checkbox("高光", ref affMask))
-                { layer.AffectsMask = affMask; MarkPreviewDirty(); }
+                var affEmissive = layer.AffectsEmissive;
+                if (ImGui.Checkbox("发光", ref affEmissive))
+                { layer.AffectsEmissive = affEmissive; MarkPreviewDirty(); }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("修改材质启用发光效果");
 
-                if (layer.AffectsMask)
+                if (layer.AffectsEmissive)
                 {
-                    ImGui.SetNextItemWidth(-1);
-                    var spec = layer.GlowSpecular;
-                    if (ImGui.DragFloat("##spec", ref spec, 0.01f, 0f, 1f, "%.2f"))
-                    { layer.GlowSpecular = spec; MarkPreviewDirty(); }
-                    if (ScrollAdjust(ref spec, 0.02f, 0f, 1f))
-                    { layer.GlowSpecular = spec; MarkPreviewDirty(); }
-                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("镜面反射 ");
+                    var emColor = layer.EmissiveColor;
+                    if (ImGui.ColorEdit3("##emColor", ref emColor, ImGuiColorEditFlags.NoInputs | ImGuiColorEditFlags.NoLabel))
+                    { layer.EmissiveColor = emColor; MarkPreviewDirty(); }
+                    ImGui.SameLine();
+                    ImGui.Text("发光颜色");
 
                     ImGui.SetNextItemWidth(-1);
-                    var smooth = layer.GlowSmoothness;
-                    if (ImGui.DragFloat("##smooth", ref smooth, 0.01f, 0f, 1f, "%.2f"))
-                    { layer.GlowSmoothness = smooth; MarkPreviewDirty(); }
-                    if (ScrollAdjust(ref smooth, 0.02f, 0f, 1f))
-                    { layer.GlowSmoothness = smooth; MarkPreviewDirty(); }
-                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("光滑度 ");
+                    var emIntensity = layer.EmissiveIntensity;
+                    if (ImGui.DragFloat("##emIntensity", ref emIntensity, 0.05f, 0.1f, 10f, "%.2f"))
+                    { layer.EmissiveIntensity = emIntensity; MarkPreviewDirty(); }
+                    if (ScrollAdjust(ref emIntensity, 0.1f, 0.1f, 10f))
+                    { layer.EmissiveIntensity = emIntensity; MarkPreviewDirty(); }
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("发光强度");
+
+                    ImGui.SetNextItemWidth(-1);
+                    var maskIdx = (int)layer.EmissiveMask;
+                    if (ImGui.Combo("##emMask", ref maskIdx, EmissiveMaskNames, EmissiveMaskNames.Length))
+                    { layer.EmissiveMask = (EmissiveMask)maskIdx; MarkPreviewDirty(); }
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("发光遮罩模式");
+
+                    if (layer.EmissiveMask != EmissiveMask.Uniform)
+                    {
+                        ImGui.SetNextItemWidth(-1);
+                        var falloff = layer.EmissiveMaskFalloff;
+                        if (ImGui.DragFloat("##emFalloff", ref falloff, 0.01f, 0.01f, 1f, "%.2f"))
+                        { layer.EmissiveMaskFalloff = falloff; MarkPreviewDirty(); }
+                        if (ScrollAdjust(ref falloff, 0.05f, 0.01f, 1f))
+                        { layer.EmissiveMaskFalloff = falloff; MarkPreviewDirty(); }
+                        if (ImGui.IsItemHovered()) ImGui.SetTooltip("渐变范围");
+                    }
+
+                    // Emissive mask preview
+                    DrawEmissiveMaskPreview(layer.EmissiveMask, layer.EmissiveMaskFalloff);
+
+                    if (string.IsNullOrEmpty(group.MtrlGamePath))
+                        ImGui.TextColored(new Vector4(1, 0.5f, 0.3f, 1), "需要选择材质(.mtrl)");
                 }
             }
         }
@@ -869,22 +900,46 @@ public class MainWindow : Window, IDisposable
         DrawActionsSection();
     }
 
-    private void DrawActionsSection()
+    private void DrawEmissiveMaskPreview(EmissiveMask mask, float falloff)
     {
-        var hasDiffuse = !string.IsNullOrEmpty(config.TargetTextureGamePath);
-        var hasMesh = previewService.CurrentMesh != null;
+        ImGui.TextDisabled("遮罩预览:");
+        var previewSize = 100f;
+        var pos = ImGui.GetCursorScreenPos();
+        var drawList = ImGui.GetWindowDrawList();
 
-        if (!hasMesh && !string.IsNullOrEmpty(config.TargetMeshDiskPath))
+        var cellCount = 32;
+        var cellSize = previewSize / cellCount;
+
+        for (int y = 0; y < cellCount; y++)
         {
-            if (ImGui.Button("加载网格", new Vector2(-1, 24)))
+            for (int x = 0; x < cellCount; x++)
             {
-                var ok = previewService.LoadMesh(config.TargetMeshDiskPath);
-                meshLoadStatus = ok ? $"{previewService.CurrentMesh?.Vertices.Length} 顶点" : "失败";
+                float ru = (x + 0.5f) / cellCount - 0.5f;
+                float rv = (y + 0.5f) / cellCount - 0.5f;
+                float val = PreviewService.ComputeEmissiveMask(mask, falloff, ru, rv, 1f);
+
+                var color = ImGui.GetColorU32(new Vector4(val, val, val, 1f));
+                var p0 = pos + new Vector2(x * cellSize, y * cellSize);
+                var p1 = p0 + new Vector2(cellSize + 0.5f, cellSize + 0.5f);
+                drawList.AddRectFilled(p0, p1, color);
             }
         }
 
-        if (!string.IsNullOrEmpty(meshLoadStatus))
-            ImGui.TextDisabled(meshLoadStatus);
+        drawList.AddRect(pos, pos + new Vector2(previewSize),
+            ImGui.GetColorU32(new Vector4(0.4f, 0.4f, 0.4f, 1f)));
+        ImGui.Dummy(new Vector2(previewSize, previewSize + 4));
+    }
+
+    private void DrawActionsSection()
+    {
+        var group = project.SelectedGroup;
+        var hasTarget = group != null && !string.IsNullOrEmpty(group.DiffuseGamePath);
+
+        if (group != null && !string.IsNullOrEmpty(group.MeshDiskPath) && previewService.CurrentMesh == null)
+        {
+            if (ImGui.Button("加载模型", new Vector2(-1, 24)))
+                previewService.LoadMesh(group.MeshDiskPath);
+        }
 
         var autoPreview = config.AutoPreview;
         if (ImGui.Checkbox("自动预览", ref autoPreview))
@@ -896,15 +951,14 @@ public class MainWindow : Window, IDisposable
 
         if (!config.AutoPreview)
         {
-            using (ImRaii.Disabled(!hasDiffuse))
+            using (ImRaii.Disabled(!hasTarget))
             {
                 if (ImGui.Button("更新预览", new Vector2(-1, 26)))
                     TriggerPreview();
             }
         }
 
-        // Auto-preview debounce: wait until no changes for DebounceSec
-        if (config.AutoPreview && previewDirty && hasDiffuse)
+        if (config.AutoPreview && previewDirty && hasTarget)
         {
             var elapsed = (DateTime.UtcNow - lastDirtyTime).TotalSeconds;
             if (elapsed >= PreviewDebounceSec)
@@ -917,11 +971,72 @@ public class MainWindow : Window, IDisposable
 
     private void TriggerPreview()
     {
-        var targets = new PreviewService.TextureTargets(
-            config.TargetTextureGamePath, config.TargetTextureDiskPath,
-            config.TargetNormGamePath, config.TargetNormDiskPath,
-            config.TargetMaskGamePath, config.TargetMaskDiskPath);
-        previewService.UpdatePreview(project, targets);
+        // Auto-detect mtrl for groups that need emissive
+        foreach (var group in project.Groups)
+        {
+            if (group.HasEmissiveLayers() && string.IsNullOrEmpty(group.MtrlGamePath))
+                AutoDetectMtrl(group);
+        }
+
+        previewService.UpdatePreview(project);
+    }
+
+    private void AutoDetectMtrl(TargetGroup group)
+    {
+        // Try finding mtrl from the resource tree by locating the equipment node
+        // that contains our diffuse texture, then grabbing its mtrl descendant
+        var trees = penumbra.GetPlayerTrees();
+        if (trees == null || string.IsNullOrEmpty(group.DiffuseGamePath)) return;
+
+        foreach (var (_, tree) in trees)
+        {
+            foreach (var topNode in tree.Nodes)
+            {
+                var diffuse = FindDescendant(topNode, n =>
+                    n.Type == ResourceType.Tex && n.GamePath == group.DiffuseGamePath);
+                if (diffuse == null) continue;
+
+                var mtrl = FindDescendant(topNode, n =>
+                    n.Type == ResourceType.Mtrl && !n.ActualPath.Contains("pluginConfigs"));
+                if (mtrl != null)
+                {
+                    group.MtrlGamePath = mtrl.GamePath ?? "";
+                    group.MtrlDiskPath = mtrl.ActualPath;
+                    group.OrigMtrlDiskPath ??= mtrl.ActualPath;
+                    DebugServer.AppendLog($"[MainWindow] Auto-detected mtrl for {group.Name}: {mtrl.GamePath}");
+                    return;
+                }
+            }
+        }
+
+        // Fallback: match by disk path proximity
+        var diffuseDisk = group.OrigDiffuseDiskPath ?? group.DiffuseDiskPath;
+        if (string.IsNullOrEmpty(diffuseDisk)) return;
+        var targetDir = Path.GetDirectoryName(diffuseDisk)?.Replace('\\', '/').ToLowerInvariant() ?? "";
+
+        var resources = penumbra.GetPlayerResources();
+        if (resources == null) return;
+
+        foreach (var (_, paths) in resources)
+        {
+            foreach (var (diskPath, gamePaths) in paths)
+            {
+                if (diskPath.Contains("pluginConfigs")) continue;
+                var ext = Path.GetExtension(diskPath).ToLowerInvariant();
+                if (ext != ".mtrl") continue;
+
+                var mtrlDir = Path.GetDirectoryName(diskPath)?.Replace('\\', '/').ToLowerInvariant() ?? "";
+                if (mtrlDir == targetDir)
+                {
+                    var gp = gamePaths.FirstOrDefault() ?? "";
+                    group.MtrlGamePath = gp;
+                    group.MtrlDiskPath = diskPath;
+                    group.OrigMtrlDiskPath ??= diskPath;
+                    DebugServer.AppendLog($"[MainWindow] Auto-detected mtrl (disk proximity) for {group.Name}: {gp}");
+                    return;
+                }
+            }
+        }
     }
 
     private void MarkPreviewDirty()
@@ -930,7 +1045,6 @@ public class MainWindow : Window, IDisposable
         lastDirtyTime = DateTime.UtcNow;
     }
 
-    /// <summary>Call after a DragFloat — if hovered, scroll wheel micro-adjusts the value.</summary>
     private static bool ScrollAdjust(ref float value, float step, float min, float max)
     {
         if (!ImGui.IsItemHovered()) return false;
@@ -940,12 +1054,12 @@ public class MainWindow : Window, IDisposable
         return true;
     }
 
-    // ── Resource Browser Window ───────────────────────────────────────────────
+    // ── Resource Browser Window ──────────────────────────────────────────────
 
     private void DrawResourceWindow()
     {
-        ImGui.SetNextWindowSize(new Vector2(780, 550), ImGuiCond.FirstUseEver);
-        if (!ImGui.Begin("选择投影目标###SkinTatooResources", ref resourceWindowOpen))
+        ImGui.SetNextWindowSize(new Vector2(900, 600), ImGuiCond.FirstUseEver);
+        if (!ImGui.Begin("添加投影目标###SkinTatooResources", ref resourceWindowOpen))
         {
             ImGui.End();
             return;
@@ -953,6 +1067,12 @@ public class MainWindow : Window, IDisposable
 
         if (ImGui.Button("刷新资源"))
             RefreshResources();
+        ImGui.SameLine();
+        if (ImGui.Button("全部展开"))
+            treeExpandRequest = true;
+        ImGui.SameLine();
+        if (ImGui.Button("全部折叠"))
+            treeCollapseRequest = true;
         ImGui.SameLine();
         ImGui.TextDisabled(penumbra.IsAvailable ? "Penumbra 已连接" : "Penumbra 未连接");
 
@@ -963,7 +1083,7 @@ public class MainWindow : Window, IDisposable
             return;
         }
 
-        if (cachedGroups == null || cachedGroups.Count == 0)
+        if (cachedTrees == null || cachedTrees.Count == 0)
         {
             ImGui.TextDisabled("点击「刷新资源」查询玩家资源");
             ImGui.End();
@@ -972,357 +1092,393 @@ public class MainWindow : Window, IDisposable
 
         ImGui.Separator();
 
-        using var scroll = ImRaii.Child("##GroupScroll", new Vector2(-1, -1), false);
+        using var scroll = ImRaii.Child("##TreeScroll", new Vector2(-1, -1), false);
         if (!scroll.Success) { ImGui.End(); return; }
 
-        for (var gi = 0; gi < cachedGroups.Count; gi++)
+        foreach (var (objIdx, tree) in cachedTrees)
         {
-            ImGui.PushID(gi);
-            DrawResourceGroup(cachedGroups[gi]);
+            ImGui.PushID(objIdx);
+
+            if (treeExpandRequest) ImGui.SetNextItemOpen(true);
+            if (treeCollapseRequest) ImGui.SetNextItemOpen(false);
+
+            var headerLabel = $"{tree.Name}  (#{objIdx})";
+            if (ImGui.CollapsingHeader(headerLabel, ImGuiTreeNodeFlags.DefaultOpen))
+            {
+                if (ImGui.BeginTable("##ResTree", 4,
+                    ImGuiTableFlags.Resizable | ImGuiTableFlags.BordersInnerH |
+                    ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
+                {
+                    ImGui.TableSetupColumn("##action", ImGuiTableColumnFlags.WidthFixed, 46);
+                    ImGui.TableSetupColumn("装备/外貌", ImGuiTableColumnFlags.WidthFixed, 280);
+                    ImGui.TableSetupColumn("游戏路径", ImGuiTableColumnFlags.WidthStretch, 0.5f);
+                    ImGui.TableSetupColumn("实际路径", ImGuiTableColumnFlags.WidthStretch, 0.5f);
+                    ImGui.TableHeadersRow();
+
+                    for (var i = 0; i < tree.Nodes.Count; i++)
+                    {
+                        if (!HasMtrlDescendant(tree.Nodes[i])) continue;
+                        ImGui.PushID(i);
+                        DrawResourceNode(tree.Nodes[i], null);
+                        ImGui.PopID();
+                    }
+
+                    ImGui.EndTable();
+                }
+            }
             ImGui.PopID();
         }
+
+        treeExpandRequest = false;
+        treeCollapseRequest = false;
 
         ImGui.End();
     }
 
-    private void DrawResourceGroup(ResourceGroup group)
+    /// <param name="parentMdl">The parent Mdl node, passed down so Mtrl rows can reference mesh info.</param>
+    private void DrawResourceNode(ResourceNodeDto node, ResourceNodeDto? parentMdl)
     {
-        var isSelected = group.Diffuse != null &&
-                         config.TargetTextureGamePath == group.Diffuse.GamePath;
+        var mdlForChildren = node.Type == ResourceType.Mdl ? node : parentMdl;
 
-        var headerColor = isSelected
-            ? new Vector4(0.2f, 0.8f, 0.4f, 1f)
-            : new Vector4(0.8f, 0.8f, 0.8f, 1f);
-        ImGui.PushStyleColor(ImGuiCol.Text, headerColor);
-        var label = isSelected ? $"★ {group.Label}" : group.Label;
-        var open = ImGui.CollapsingHeader(label, ImGuiTreeNodeFlags.DefaultOpen);
-        ImGui.PopStyleColor();
+        ImGui.TableNextRow();
 
-        if (ImGui.IsItemHovered() && !string.IsNullOrEmpty(group.Directory))
-            ImGui.SetTooltip(group.Directory);
-
-        if (!open) return;
-
-        ImGui.Indent(8);
-
-        if (group.Diffuse != null)
+        // Column 1: action button
+        ImGui.TableNextColumn();
+        var isMtrl = node.Type == ResourceType.Mtrl;
+        var mtrlHasDiffuse = isMtrl && HasDiffuseDescendant(node);
+        if (mtrlHasDiffuse)
         {
-            if (isSelected)
+            var addedGroupName = GetMtrlAddedGroupName(node);
+            if (addedGroupName != null)
             {
                 ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.3f, 1f, 0.3f, 1f));
                 ImGui.PushFont(UiBuilder.IconFont);
                 ImGui.Text(FontAwesomeIcon.Check.ToIconString());
                 ImGui.PopFont();
                 ImGui.PopStyleColor();
-                ImGui.SameLine();
-                ImGui.TextColored(new Vector4(0.3f, 1f, 0.3f, 1f), "当前目标");
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip($"已添加到: {addedGroupName}");
             }
-            else if (ImGui.Button("使用此组"))
-                SelectGroup(group);
-
-            ImGui.SameLine();
-            ImGui.TextDisabled($"({group.EntryCount} 项)");
-        }
-        else
-        {
-            ImGui.TextDisabled($"({group.EntryCount} 项，无基础贴图)");
-        }
-
-        ImGui.Spacing();
-
-        if (ImGui.BeginTable("##GroupItems", 4, ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.NoSavedSettings))
-        {
-            ImGui.TableSetupColumn("##sel", ImGuiTableColumnFlags.WidthFixed, 24);
-            ImGui.TableSetupColumn("##preview", ImGuiTableColumnFlags.WidthFixed, 36);
-            ImGui.TableSetupColumn("##info", ImGuiTableColumnFlags.WidthStretch);
-            ImGui.TableSetupColumn("##action", ImGuiTableColumnFlags.WidthFixed, 50);
-
-            foreach (var entry in group.OrderedEntries)
+            else if (ImGui.SmallButton("添加"))
             {
-                ImGui.PushID(entry.GamePath);
-                ImGui.TableNextRow(ImGuiTableRowFlags.None, 36);
-                DrawGroupedResourceRow(entry);
+                AddTargetGroupFromMtrl(node, parentMdl);
+            }
+        }
+
+        // Column 2: tree structure + name
+        ImGui.TableNextColumn();
+        var nodeName = node.Name ?? Path.GetFileName(node.GamePath ?? node.ActualPath);
+        var visibleChildren = node.Children.Where(c => !ShouldSkipNode(c)).ToList();
+        var hasChildren = visibleChildren.Count > 0;
+        var flags = ImGuiTreeNodeFlags.SpanAvailWidth;
+        if (!hasChildren) flags |= ImGuiTreeNodeFlags.Leaf | ImGuiTreeNodeFlags.NoTreePushOnOpen;
+
+        if (treeExpandRequest) ImGui.SetNextItemOpen(true);
+        if (treeCollapseRequest) ImGui.SetNextItemOpen(false);
+
+        var added = mtrlHasDiffuse && GetMtrlAddedGroupName(node) != null;
+        if (added) ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.3f, 1f, 0.3f, 1f));
+
+        var typeTag = GetNodeTypeTag(node);
+        var label = string.IsNullOrEmpty(typeTag) ? nodeName : $"{typeTag} {nodeName}";
+        var open = ImGui.TreeNodeEx(label, flags);
+
+        if (added) ImGui.PopStyleColor();
+
+        // Column 3: game path
+        ImGui.TableNextColumn();
+        if (!string.IsNullOrEmpty(node.GamePath))
+        {
+            ImGui.TextUnformatted(node.GamePath);
+            DrawPathHoverPreview(node, node.GamePath);
+            DrawPathContextMenu(node.GamePath, "gp");
+        }
+
+        // Column 4: actual path
+        ImGui.TableNextColumn();
+        if (!string.IsNullOrEmpty(node.ActualPath))
+        {
+            var isModded = IsModdedPath(node);
+            if (isModded) ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.5f, 0.8f, 1f, 1f));
+            ImGui.TextUnformatted(node.ActualPath);
+            if (isModded) ImGui.PopStyleColor();
+            DrawPathHoverPreview(node, node.ActualPath);
+            DrawPathContextMenu(node.ActualPath, "ap");
+        }
+
+        // Recurse visible children
+        if (open && hasChildren)
+        {
+            for (var i = 0; i < visibleChildren.Count; i++)
+            {
+                ImGui.PushID(i);
+                DrawResourceNode(visibleChildren[i], mdlForChildren);
                 ImGui.PopID();
             }
-
-            ImGui.EndTable();
+            ImGui.TreePop();
         }
-
-        ImGui.Unindent(8);
-        ImGui.Spacing();
     }
 
-    private void DrawGroupedResourceRow(ResourceEntry entry)
+    private void DrawPathHoverPreview(ResourceNodeDto node, string path)
     {
-        var (roleLabel, roleColor, roleIcon) = GetRoleInfo(entry);
-        var isActive = IsEntryActive(entry);
-
-        ImGui.TableNextColumn();
-        if (isActive)
+        if (!ImGui.IsItemHovered() || node.Type != ResourceType.Tex) return;
+        try
         {
-            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.3f, 1f, 0.3f, 1f));
-            ImGui.PushFont(UiBuilder.IconFont);
-            ImGui.Text(FontAwesomeIcon.Check.ToIconString());
-            ImGui.PopFont();
-            ImGui.PopStyleColor();
-        }
-
-        ImGui.TableNextColumn();
-        if (entry.Extension == ".tex")
-        {
-            try
+            var normalized = path.Replace('\\', '/');
+            var shared = Path.IsPathRooted(path)
+                ? textureProvider.GetFromFile(path)
+                : textureProvider.GetFromGame(normalized);
+            var wrap = shared.GetWrapOrDefault();
+            if (wrap != null)
             {
-                var shared = File.Exists(entry.DiskPath)
-                    ? textureProvider.GetFromFile(entry.DiskPath)
-                    : textureProvider.GetFromGame(entry.GamePath);
-                var wrap = shared.GetWrapOrDefault();
-                if (wrap != null)
-                {
-                    ImGui.Image(wrap.Handle, new Vector2(32, 32));
-                    if (ImGui.IsItemHovered())
-                    {
-                        ImGui.BeginTooltip();
-                        ImGui.Image(wrap.Handle, new Vector2(384, 384));
-                        ImGui.Text($"{wrap.Width}x{wrap.Height}");
-                        ImGui.EndTooltip();
-                    }
-                }
+                ImGui.BeginTooltip();
+                ImGui.Image(wrap.Handle, new Vector2(384, 384));
+                ImGui.Text($"{wrap.Width}x{wrap.Height}");
+                ImGui.EndTooltip();
             }
-            catch { }
         }
-        else
-        {
-            ImGui.PushStyleColor(ImGuiCol.Text, roleColor);
-            ImGui.PushFont(UiBuilder.IconFont);
-            ImGui.Text(roleIcon.ToIconString());
-            ImGui.PopFont();
-            ImGui.PopStyleColor();
-        }
-
-        ImGui.TableNextColumn();
-        ImGui.TextColored(roleColor, $"[{roleLabel}]");
-        ImGui.SameLine();
-        ImGui.Text(Path.GetFileName(entry.GamePath));
-        if (ImGui.IsItemClicked()) ImGui.SetClipboardText(entry.GamePath);
-        if (ImGui.IsItemHovered())
-        {
-            ImGui.BeginTooltip();
-            ImGui.Text(entry.GamePath);
-            if (entry.DiskPath != entry.GamePath) ImGui.TextDisabled(entry.DiskPath);
-            ImGui.TextDisabled("点击复制");
-            ImGui.EndTooltip();
-        }
-
-        ImGui.TableNextColumn();
-        if (!isActive && ImGui.SmallButton("使用"))
-            SelectSingleEntry(entry);
+        catch { }
     }
 
-    private static (string label, Vector4 color, FontAwesomeIcon icon) GetRoleInfo(ResourceEntry entry)
+    private static void DrawPathContextMenu(string path, string id)
     {
-        return entry.Role switch
+        if (!ImGui.BeginPopupContextItem(id)) return;
+        if (ImGui.Selectable("复制路径"))
+            ImGui.SetClipboardText(path);
+        ImGui.EndPopup();
+    }
+
+    private static bool IsModdedPath(ResourceNodeDto node)
+    {
+        if (node.GamePath == null) return false;
+        // actualPath with backslashes but same content as gamePath is NOT modded
+        var normalized = node.ActualPath.Replace('\\', '/');
+        return normalized != node.GamePath;
+    }
+
+    private static bool ShouldSkipNode(ResourceNodeDto node)
+    {
+        // Skip node types that are not useful for decal target selection
+        return node.Type is ResourceType.Imc or ResourceType.Sklb or ResourceType.Skp
+            or ResourceType.Phyb or ResourceType.Eid or ResourceType.Pbd
+            or ResourceType.Kdb or ResourceType.Shpk;
+    }
+
+    private static bool HasMtrlDescendant(ResourceNodeDto node)
+    {
+        if (node.Type == ResourceType.Mtrl) return true;
+        return node.Children.Any(HasMtrlDescendant);
+    }
+
+
+    private static string GetNodeTypeTag(ResourceNodeDto node)
+    {
+        // Equipment-level icons take priority
+        var iconTag = node.Icon switch
         {
-            TextureRole.Diffuse => ("贴图", new Vector4(0.3f, 1f, 0.5f, 1f), FontAwesomeIcon.Image),
-            TextureRole.Normal => ("法线", new Vector4(0.5f, 0.5f, 1f, 1f), FontAwesomeIcon.Image),
-            TextureRole.Mask => ("遮罩", new Vector4(1f, 0.8f, 0.3f, 1f), FontAwesomeIcon.Image),
-            TextureRole.Mesh => ("网格", new Vector4(0.3f, 0.7f, 1f, 1f), FontAwesomeIcon.DrawPolygon),
-            TextureRole.Material => ("材质", new Vector4(0.8f, 0.6f, 0.3f, 1f), FontAwesomeIcon.Palette),
-            _ => ("其他", new Vector4(0.6f, 0.6f, 0.6f, 1f), FontAwesomeIcon.File),
+            ChangedItemIcon.Head => "[头部]",
+            ChangedItemIcon.Body => "[身体]",
+            ChangedItemIcon.Hands => "[手部]",
+            ChangedItemIcon.Legs => "[腿部]",
+            ChangedItemIcon.Feet => "[脚部]",
+            ChangedItemIcon.Ears => "[耳饰]",
+            ChangedItemIcon.Neck => "[项链]",
+            ChangedItemIcon.Wrists => "[手镯]",
+            ChangedItemIcon.Finger => "[戒指]",
+            ChangedItemIcon.Mainhand => "[主手]",
+            ChangedItemIcon.Offhand => "[副手]",
+            ChangedItemIcon.Customization => "[外貌]",
+            _ => (string?)null,
+        };
+        if (iconTag != null) return iconTag;
+
+        return node.Type switch
+        {
+            ResourceType.Mdl => "[模型]",
+            ResourceType.Mtrl => "[材质]",
+            ResourceType.Tex => "[贴图]",
+            _ => "",
         };
     }
 
-    private bool IsEntryActive(ResourceEntry entry) => entry.Role switch
-    {
-        TextureRole.Diffuse => config.TargetTextureGamePath == entry.GamePath,
-        TextureRole.Normal => config.TargetNormGamePath == entry.GamePath,
-        TextureRole.Mask => config.TargetMaskGamePath == entry.GamePath,
-        TextureRole.Mesh => config.TargetMeshDiskPath == entry.DiskPath,
-        _ => false,
-    };
+    // ── Selection logic ──────────────────────────────────────────────────────
 
-    // ── Selection logic ───────────────────────────────────────────────────────
-
-    private void SelectGroup(ResourceGroup group)
+    private void AddTargetGroupFromMtrl(ResourceNodeDto mtrlNode, ResourceNodeDto? parentMdl)
     {
         previewService.ClearTextureCache();
         penumbra.ClearRedirect();
+        penumbra.RedrawPlayer();
 
-        if (group.Diffuse != null)
-        {
-            config.TargetTextureGamePath = group.Diffuse.GamePath;
-            config.TargetTextureDiskPath = group.Diffuse.DiskPath;
-        }
-        config.TargetNormGamePath = group.Normal?.GamePath;
-        config.TargetNormDiskPath = group.Normal?.DiskPath;
-        config.TargetMaskGamePath = group.Mask?.GamePath;
-        config.TargetMaskDiskPath = group.Mask?.DiskPath;
+        // Capture diffuse game path before refresh for re-finding
+        var diffuse = FindDescendant(mtrlNode, n =>
+            n.Type == ResourceType.Tex && n.GamePath != null && IsDiffusePath(n.GamePath));
+        var diffuseGp = diffuse?.GamePath;
+        var mtrlGp = mtrlNode.GamePath;
 
-        if (group.Mesh != null)
+        // Re-refresh for clean disk paths
+        RefreshResources();
+
+        // Re-find the Mtrl node in the refreshed tree
+        ResourceNodeDto? freshMtrl = null;
+        ResourceNodeDto? freshMdl = null;
+        if (cachedTrees != null)
         {
-            previewService.LoadMesh(group.Mesh.DiskPath);
-            config.TargetMeshDiskPath = group.Mesh.DiskPath;
+            foreach (var (_, tree) in cachedTrees)
+            {
+                foreach (var topNode in tree.Nodes)
+                {
+                    var candidates = CollectDescendants(topNode, n => n.Type == ResourceType.Mtrl);
+                    foreach (var candidate in candidates)
+                    {
+                        // Match by mtrl game path first, then by diffuse game path
+                        var match = (mtrlGp != null && candidate.GamePath == mtrlGp) ||
+                            (diffuseGp != null && FindDescendant(candidate, n =>
+                                n.Type == ResourceType.Tex && n.GamePath == diffuseGp) != null);
+                        if (!match) continue;
+
+                        freshMtrl = candidate;
+                        // Find the parent Mdl
+                        freshMdl = FindAncestorMdl(topNode, candidate);
+                        goto found;
+                    }
+                }
+            }
         }
+        found:
+        freshMtrl ??= mtrlNode;
+        freshMdl ??= parentMdl;
+
+        var groupName = freshMtrl.Name ?? Path.GetFileName(freshMtrl.GamePath ?? freshMtrl.ActualPath);
+        var tg = project.AddGroup(groupName);
+
+        // Diffuse and Normal from Mtrl's Tex children
+        var freshDiffuse = FindDescendant(freshMtrl, n =>
+            n.Type == ResourceType.Tex && n.GamePath != null && IsDiffusePath(n.GamePath));
+        var freshNormal = FindDescendant(freshMtrl, n =>
+            n.Type == ResourceType.Tex && n.GamePath != null && IsNormalPath(n.GamePath));
+
+        if (freshDiffuse != null)
+        {
+            tg.DiffuseGamePath = freshDiffuse.GamePath!;
+            tg.DiffuseDiskPath = GetDiskPath(freshDiffuse);
+            tg.OrigDiffuseDiskPath = tg.DiffuseDiskPath;
+        }
+
+        if (freshNormal != null)
+        {
+            tg.NormGamePath = freshNormal.GamePath!;
+            tg.NormDiskPath = GetDiskPath(freshNormal);
+            tg.OrigNormDiskPath = tg.NormDiskPath;
+        }
+
+        // Material is the Mtrl node itself
+        tg.MtrlGamePath = freshMtrl.GamePath ?? "";
+        tg.MtrlDiskPath = GetDiskPath(freshMtrl);
+        tg.OrigMtrlDiskPath = tg.MtrlDiskPath;
+
+        // Mesh from parent Mdl
+        if (freshMdl != null)
+        {
+            var meshPath = GetDiskPath(freshMdl);
+            tg.MeshDiskPath = meshPath;
+            previewService.LoadMesh(meshPath);
+        }
+
         config.Save();
-        DebugServer.AppendLog($"[MainWindow] Selected group: {group.Label}");
+        DebugServer.AppendLog($"[MainWindow] Added target group: {tg.Name}");
     }
 
-    private void SelectSingleEntry(ResourceEntry entry)
-    {
-        switch (entry.Role)
-        {
-            case TextureRole.Diffuse:
-                previewService.ClearTextureCache();
-                penumbra.ClearRedirect();
-                config.TargetTextureGamePath = entry.GamePath;
-                config.TargetTextureDiskPath = entry.DiskPath;
-                break;
-            case TextureRole.Normal:
-                config.TargetNormGamePath = entry.GamePath;
-                config.TargetNormDiskPath = entry.DiskPath;
-                break;
-            case TextureRole.Mask:
-                config.TargetMaskGamePath = entry.GamePath;
-                config.TargetMaskDiskPath = entry.DiskPath;
-                break;
-            case TextureRole.Mesh:
-                previewService.LoadMesh(entry.DiskPath);
-                config.TargetMeshDiskPath = entry.DiskPath;
-                break;
-        }
-        config.Save();
-        DebugServer.AppendLog($"[MainWindow] Selected {entry.Role}: {entry.GamePath}");
-    }
-
-    // ── Resource loading & semantic grouping ──────────────────────────────────
+    // ── Resource tree helpers ────────────────────────────────────────────────
 
     private void RefreshResources()
     {
-        var entries = new List<ResourceEntry>();
-        var resources = penumbra.GetPlayerResources();
-        if (resources == null) { cachedGroups = []; return; }
-
-        foreach (var (objIdx, paths) in resources)
-        {
-            foreach (var (diskPath, gamePaths) in paths)
-            {
-                var ext = Path.GetExtension(diskPath).ToLowerInvariant();
-                if (ext is not (".mdl" or ".tex" or ".mtrl")) continue;
-                foreach (var gp in gamePaths)
-                {
-                    entries.Add(new ResourceEntry
-                    {
-                        DiskPath = diskPath, GamePath = gp,
-                        Extension = ext, Role = ClassifyRole(gp, ext),
-                    });
-                }
-            }
-        }
-
-        cachedGroups = BuildGroups(entries);
-        DebugServer.AppendLog($"[MainWindow] Refreshed: {entries.Count} entries -> {cachedGroups.Count} groups");
+        cachedTrees = penumbra.GetPlayerTrees();
+        var count = cachedTrees?.Values.Sum(t => CountNodes(t.Nodes)) ?? 0;
+        DebugServer.AppendLog($"[MainWindow] Refreshed: {cachedTrees?.Count ?? 0} objects, {count} nodes");
     }
 
-    private static TextureRole ClassifyRole(string gamePath, string ext)
+    private static int CountNodes(List<ResourceNodeDto> nodes)
+        => nodes.Sum(n => 1 + CountNodes(n.Children));
+
+    private static ResourceNodeDto? FindDescendant(ResourceNodeDto node, Func<ResourceNodeDto, bool> predicate)
     {
-        if (ext == ".mdl") return TextureRole.Mesh;
-        if (ext == ".mtrl") return TextureRole.Material;
-        var gp = gamePath.ToLowerInvariant();
-        if (gp.Contains("norm") || gp.EndsWith("_n.tex")) return TextureRole.Normal;
-        if (gp.Contains("mask") || gp.EndsWith("_s.tex")) return TextureRole.Mask;
-        return TextureRole.Diffuse;
+        foreach (var child in node.Children)
+        {
+            if (predicate(child)) return child;
+            var found = FindDescendant(child, predicate);
+            if (found != null) return found;
+        }
+        return null;
     }
 
-    private static string ClassifyBodyPart(string gamePath, string diskPath)
+    private static bool HasDiffuseDescendant(ResourceNodeDto node)
+    {
+        if (node.Type == ResourceType.Tex && node.GamePath != null && IsDiffusePath(node.GamePath))
+            return true;
+        return node.Children.Any(HasDiffuseDescendant);
+    }
+
+    private static bool IsDiffusePath(string gamePath)
     {
         var gp = gamePath.ToLowerInvariant();
-        if (gp.Contains("obj/body/") || (gp.Contains("e0000") && gp.Contains("_top")))
-            return "body";
-        if (gp.Contains("obj/face/") || gp.Contains("fac_") || gp.Contains("/face/"))
-            return "face";
-        if (gp.Contains("/hair/") || gp.Contains("obj/hair/"))
-            return "hair";
-        if (gp.Contains("/tail/") || gp.Contains("obj/tail/"))
-            return "tail";
-        if (gp.Contains("/zear/") || gp.Contains("obj/zear/"))
-            return "ear";
-        if (gp.Contains("weapon/"))
-            return "weapon";
-        if (gp.Contains("equipment/"))
-        {
-            var eIdx = gp.IndexOf("equipment/", StringComparison.Ordinal) + 10;
-            var slashAfter = gp.IndexOf('/', eIdx);
-            if (slashAfter > eIdx) return "equip/" + gp[eIdx..slashAfter];
-        }
-        var dp = diskPath.ToLowerInvariant();
-        if (dp.Contains("body") || dp.Contains("_top")) return "body";
-        var lastSlash = gamePath.LastIndexOf('/');
-        return lastSlash > 0 ? gamePath[..lastSlash] : "other";
+        return gp.EndsWith(".tex") && !gp.Contains("_n.tex") && !gp.Contains("_m.tex")
+            && !gp.Contains("norm") && !gp.Contains("mask");
     }
 
-    private static readonly Dictionary<string, string> BodyPartLabels = new()
+    /// <summary>
+    /// Get the effective disk path from a resource node.
+    /// If actualPath is an absolute path (modded), use it; otherwise use gamePath.
+    /// </summary>
+    private static string GetDiskPath(ResourceNodeDto node)
+        => Path.IsPathRooted(node.ActualPath) ? node.ActualPath : (node.GamePath ?? node.ActualPath);
+
+    private static bool IsNormalPath(string gamePath)
     {
-        { "body", "身体" }, { "face", "面部" }, { "hair", "头发" },
-        { "tail", "尾巴" }, { "ear", "耳朵" }, { "weapon", "武器" },
-    };
-
-    private static List<ResourceGroup> BuildGroups(List<ResourceEntry> entries)
-    {
-        var partMap = new Dictionary<string, List<ResourceEntry>>(StringComparer.OrdinalIgnoreCase);
-        foreach (var entry in entries)
-        {
-            var part = ClassifyBodyPart(entry.GamePath, entry.DiskPath);
-            if (!partMap.TryGetValue(part, out var list)) { list = []; partMap[part] = list; }
-            list.Add(entry);
-        }
-
-        var groups = new List<ResourceGroup>();
-        foreach (var (part, list) in partMap)
-        {
-            var group = new ResourceGroup { Directory = part };
-            foreach (var e in list)
-            {
-                switch (e.Role)
-                {
-                    case TextureRole.Diffuse: group.Diffuse ??= e; break;
-                    case TextureRole.Normal: group.Normal ??= e; break;
-                    case TextureRole.Mask: group.Mask ??= e; break;
-                    case TextureRole.Mesh: group.Mesh ??= e; break;
-                }
-            }
-            group.AllEntries = list;
-
-            string name;
-            if (BodyPartLabels.TryGetValue(part, out var cn)) name = cn;
-            else if (part.StartsWith("equip/")) name = $"装备 {part[6..]}";
-            else name = part;
-            var summary = "";
-            if (group.Diffuse != null) summary += " D";
-            if (group.Normal != null) summary += " N";
-            if (group.Mask != null) summary += " M";
-            if (group.Mesh != null) summary += " ▲";
-            group.Label = $"{name}{summary}";
-
-            groups.Add(group);
-        }
-
-        groups.Sort((a, b) =>
-        {
-            var ap = GetPartPriority(a.Directory);
-            var bp = GetPartPriority(b.Directory);
-            return ap != bp ? ap.CompareTo(bp) :
-                string.Compare(a.Label, b.Label, StringComparison.OrdinalIgnoreCase);
-        });
-        return groups;
+        var gp = gamePath.ToLowerInvariant();
+        return gp.EndsWith(".tex") && (gp.Contains("_n.tex") || gp.Contains("norm"));
     }
 
-    private static int GetPartPriority(string part) => part switch
+    private string? GetMtrlAddedGroupName(ResourceNodeDto mtrlNode)
     {
-        "body" => 0, "face" => 1, "hair" => 2,
-        "tail" or "ear" => 3, "weapon" => 5,
-        _ => part.StartsWith("equip/") ? 4 : 6,
-    };
+        var diffuse = FindDescendant(mtrlNode, n =>
+            n.Type == ResourceType.Tex && n.GamePath != null && IsDiffusePath(n.GamePath));
+        if (diffuse?.GamePath == null) return null;
+        return project.Groups.FirstOrDefault(g => g.DiffuseGamePath == diffuse.GamePath)?.Name;
+    }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
+    private static List<ResourceNodeDto> CollectDescendants(ResourceNodeDto node, Func<ResourceNodeDto, bool> predicate)
+    {
+        var result = new List<ResourceNodeDto>();
+        if (predicate(node)) result.Add(node);
+        foreach (var child in node.Children)
+            result.AddRange(CollectDescendants(child, predicate));
+        return result;
+    }
+
+    private static ResourceNodeDto? FindAncestorMdl(ResourceNodeDto root, ResourceNodeDto target)
+    {
+        // Walk the tree to find the Mdl node that is an ancestor of target
+        if (root == target) return null;
+        foreach (var child in root.Children)
+        {
+            if (child == target)
+                return root.Type == ResourceType.Mdl ? root : null;
+            var found = FindAncestorMdl(child, target);
+            if (found != null) return found;
+            // If child contains target and child is Mdl, return child
+            if (ContainsNode(child, target) && child.Type == ResourceType.Mdl)
+                return child;
+        }
+        return null;
+    }
+
+    private static bool ContainsNode(ResourceNodeDto root, ResourceNodeDto target)
+    {
+        if (root == target) return true;
+        return root.Children.Any(c => ContainsNode(c, target));
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
 
     private void ResetSelectedLayer()
     {
@@ -1338,41 +1494,13 @@ public class MainWindow : Window, IDisposable
         layer.AffectsDiffuse = d.AffectsDiffuse;
     }
 
-    private void SyncImagePathBuf(int idx)
+    private void SyncImagePathBuf()
     {
-        lastEditedLayerIndex = idx;
-        imagePathBuf = (idx >= 0 && idx < project.Layers.Count)
-            ? (project.Layers[idx].ImagePath ?? string.Empty) : string.Empty;
+        var layer = project.SelectedLayer;
+        var group = project.SelectedGroup;
+        lastEditedLayerIndex = group?.SelectedLayerIndex ?? -1;
+        imagePathBuf = layer?.ImagePath ?? string.Empty;
     }
 
     public void Dispose() { }
-
-    // ── Inner types ───────────────────────────────────────────────────────────
-
-    private enum TextureRole { Diffuse, Normal, Mask, Mesh, Material, Other }
-
-    private class ResourceEntry
-    {
-        public string DiskPath { get; init; } = "";
-        public string GamePath { get; init; } = "";
-        public string Extension { get; init; } = "";
-        public TextureRole Role { get; init; }
-    }
-
-    private class ResourceGroup
-    {
-        public string Directory { get; set; } = "";
-        public string Label { get; set; } = "";
-        public ResourceEntry? Diffuse { get; set; }
-        public ResourceEntry? Normal { get; set; }
-        public ResourceEntry? Mask { get; set; }
-        public ResourceEntry? Mesh { get; set; }
-        public List<ResourceEntry> AllEntries { get; set; } = [];
-        public int EntryCount => AllEntries.Count;
-        public IEnumerable<ResourceEntry> OrderedEntries => AllEntries.OrderBy(e => e.Role switch
-        {
-            TextureRole.Mesh => 0, TextureRole.Diffuse => 1, TextureRole.Normal => 2,
-            TextureRole.Mask => 3, TextureRole.Material => 4, _ => 5,
-        });
-    }
 }

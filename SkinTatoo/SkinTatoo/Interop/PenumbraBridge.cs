@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using Penumbra.Api.Enums;
+using Penumbra.Api.Helpers;
 using Penumbra.Api.IpcSubscribers;
 
 namespace SkinTatoo.Interop;
@@ -17,6 +18,7 @@ public class PenumbraBridge : IDisposable
     private readonly RedrawObject redrawObject;
     private readonly ResolvePlayerPath resolvePlayerPath;
     private readonly GetPlayerResourcePaths getPlayerResourcePaths;
+    private readonly GetPlayerResourceTrees getPlayerResourceTrees;
 
     private const string TempModTag = "SkinTatooDecal";
 
@@ -32,6 +34,7 @@ public class PenumbraBridge : IDisposable
         redrawObject = new RedrawObject(pluginInterface);
         resolvePlayerPath = new ResolvePlayerPath(pluginInterface);
         getPlayerResourcePaths = new GetPlayerResourcePaths(pluginInterface);
+        getPlayerResourceTrees = new GetPlayerResourceTrees(pluginInterface);
 
         CheckAvailability();
     }
@@ -117,6 +120,17 @@ public class PenumbraBridge : IDisposable
         catch (Exception ex)
         {
             log.Error(ex, "Failed to get player resource paths");
+            return null;
+        }
+    }
+
+    public Dictionary<ushort, ResourceTreeDto>? GetPlayerTrees()
+    {
+        if (!IsAvailable) return null;
+        try { return getPlayerResourceTrees.Invoke(withUiData: true); }
+        catch (Exception ex)
+        {
+            log.Error(ex, "Failed to get player resource trees");
             return null;
         }
     }

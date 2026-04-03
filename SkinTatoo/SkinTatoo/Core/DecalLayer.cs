@@ -10,6 +10,14 @@ public enum BlendMode
     SoftLight,
 }
 
+public enum EmissiveMask
+{
+    Uniform,       // flat glow across entire decal
+    RadialFadeOut, // center bright → edge dim
+    RadialFadeIn,  // edge bright → center dim (ring glow)
+    EdgeGlow,      // only edges glow, interior dark
+}
+
 public class DecalLayer
 {
     public string Name { get; set; } = "New Decal";
@@ -24,12 +32,12 @@ public class DecalLayer
     public BlendMode BlendMode { get; set; } = BlendMode.Normal;
     public bool IsVisible { get; set; } = true;
 
-    // Which texture channels to affect
     public bool AffectsDiffuse { get; set; } = true;
-    public bool AffectsMask { get; set; } = false;
 
-    // Glow/specular override for mask texture (when AffectsMask=true)
-    // These values are written to the mask R/G channels in the decal area
-    public float GlowSpecular { get; set; } = 0.8f;   // Mask R channel (0=matte, 1=mirror)
-    public float GlowSmoothness { get; set; } = 0.8f;  // Mask G channel inverted (0=rough, 1=smooth → stored as 1-roughness)
+    // Emissive glow — controlled via .mtrl shader key + g_EmissiveColor
+    public bool AffectsEmissive { get; set; } = false;
+    public Vector3 EmissiveColor { get; set; } = new(1f, 1f, 1f);
+    public float EmissiveIntensity { get; set; } = 1.0f;
+    public EmissiveMask EmissiveMask { get; set; } = EmissiveMask.Uniform;
+    public float EmissiveMaskFalloff { get; set; } = 0.5f; // controls gradient steepness (0=sharp, 1=wide)
 }

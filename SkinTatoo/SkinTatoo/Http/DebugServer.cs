@@ -10,6 +10,7 @@ using Dalamud.Plugin.Services;
 using EmbedIO;
 using EmbedIO.Routing;
 using EmbedIO.WebApi;
+using Penumbra.Api.Helpers;
 using SkinTatoo.Core;
 using SkinTatoo.Interop;
 using SkinTatoo.Services;
@@ -62,7 +63,6 @@ public class DebugServer : IDisposable
             .WithWebApi("/api", m => m.WithController(() =>
                 new ApiController(_project, _penumbra, _preview, _config, _dataManager)));
 
-        // RunAsync returns a Task — fire and forget, errors go to AppendLog
         _ = _server.RunAsync(_cts.Token).ContinueWith(t =>
         {
             if (t.IsFaulted && t.Exception is not null)
@@ -111,34 +111,35 @@ internal sealed class ApiController : WebApiController
         _dataManager = dataManager;
     }
 
-    // ── GET /api/status ───────────────────────────────────────────────────────
     [Route(HttpVerbs.Get, "/status")]
     public object GetStatus() => new
     {
         plugin           = "SkinTatoo",
-        gpuReady         = _preview.IsReady,
         penumbraAvailable = _penumbra.IsAvailable,
         meshLoaded       = _preview.CurrentMesh is not null,
-        layerCount       = _project.Layers.Count,
-        target           = _project.Target.ToString(),
+        groupCount       = _project.Groups.Count,
         resolution       = _config.TextureResolution,
     };
 
-    // ── GET /api/project ──────────────────────────────────────────────────────
     [Route(HttpVerbs.Get, "/project")]
     public object GetProject() => new
     {
-        target             = _project.Target.ToString(),
-        selectedLayerIndex = _project.SelectedLayerIndex,
-        layers             = SerializeLayers(),
+        selectedGroupIndex = _project.SelectedGroupIndex,
+        groups = _project.Groups.Select(g => new
+        {
+            name = g.Name,
+            diffuseGamePath = g.DiffuseGamePath,
+            selectedLayerIndex = g.SelectedLayerIndex,
+            layers = g.Layers.Select(SerializeLayer).ToList(),
+        }).ToList(),
     };
 
-    // ── POST /api/layer ───────────────────────────────────────────────────────
     [Route(HttpVerbs.Post, "/layer")]
     public async Task<object> PostLayer()
     {
         var body = await HttpContext.GetRequestBodyAsStringAsync();
         string name = "New Decal";
+        int groupIndex = _project.SelectedGroupIndex;
 
         if (!string.IsNullOrWhiteSpace(body))
         {
@@ -147,19 +148,26 @@ internal sealed class ApiController : WebApiController
                 var doc = JsonDocument.Parse(body);
                 if (doc.RootElement.TryGetProperty("name", out var nameProp))
                     name = nameProp.GetString() ?? name;
+                if (doc.RootElement.TryGetProperty("groupIndex", out var gi))
+                    groupIndex = gi.GetInt32();
             }
-            catch { /* ignore malformed body */ }
+            catch { }
         }
 
-        _project.AddLayer(name);
-        return new { index = _project.Layers.Count - 1 };
+        var group = groupIndex >= 0 && groupIndex < _project.Groups.Count
+            ? _project.Groups[groupIndex] : null;
+        if (group == null)
+            return new { error = "No target group selected" };
+
+        group.AddLayer(name);
+        return new { groupIndex, layerIndex = group.Layers.Count - 1 };
     }
 
-    // ── PUT /api/layer/{id} ───────────────────────────────────────────────────
     [Route(HttpVerbs.Put, "/layer/{id}")]
     public async Task<object> PutLayer(int id)
     {
-        if (id < 0 || id >= _project.Layers.Count)
+        var group = _project.SelectedGroup;
+        if (group == null || id < 0 || id >= group.Layers.Count)
         {
             HttpContext.Response.StatusCode = 404;
             return new { error = "Layer not found" };
@@ -172,54 +180,33 @@ internal sealed class ApiController : WebApiController
             return new { error = "Empty body" };
         }
 
-        var layer = _project.Layers[id];
+        var layer = group.Layers[id];
         ApplyPartialUpdate(layer, body);
 
         return new { index = id, layer = SerializeLayer(layer) };
     }
 
-    // ── DELETE /api/layer/{id} ────────────────────────────────────────────────
     [Route(HttpVerbs.Delete, "/layer/{id}")]
     public object DeleteLayer(int id)
     {
-        if (id < 0 || id >= _project.Layers.Count)
+        var group = _project.SelectedGroup;
+        if (group == null || id < 0 || id >= group.Layers.Count)
         {
             HttpContext.Response.StatusCode = 404;
             return new { error = "Layer not found" };
         }
 
-        _project.RemoveLayer(id);
-        return new { remaining = _project.Layers.Count };
+        group.RemoveLayer(id);
+        return new { remaining = group.Layers.Count };
     }
 
-    // ── POST /api/preview ─────────────────────────────────────────────────────
     [Route(HttpVerbs.Post, "/preview")]
-    public async Task<object> PostPreview()
+    public object PostPreview()
     {
-        var body = await HttpContext.GetRequestBodyAsStringAsync();
-        string? texPath = null;
-        string? baseDiskPath = null;
-
-        if (!string.IsNullOrWhiteSpace(body))
-        {
-            try
-            {
-                var doc = JsonDocument.Parse(body);
-                if (doc.RootElement.TryGetProperty("texturePath", out var tp))
-                    texPath = tp.GetString();
-                if (doc.RootElement.TryGetProperty("baseDiskPath", out var bp))
-                    baseDiskPath = bp.GetString();
-            }
-            catch { }
-        }
-
-        var targets = new PreviewService.TextureTargets(
-            texPath, baseDiskPath, null, null, null, null);
-        var result = _preview.UpdatePreview(_project, targets);
-        return new { ok = result != null, outputPath = result };
+        _preview.UpdatePreview(_project);
+        return new { ok = true };
     }
 
-    // ── POST /api/mesh/load ───────────────────────────────────────────────────
     [Route(HttpVerbs.Post, "/mesh/load")]
     public async Task<object> PostMeshLoad()
     {
@@ -256,7 +243,6 @@ internal sealed class ApiController : WebApiController
         };
     }
 
-    // ── GET /api/mesh/info ────────────────────────────────────────────────────
     [Route(HttpVerbs.Get, "/mesh/info")]
     public object GetMeshInfo()
     {
@@ -272,14 +258,12 @@ internal sealed class ApiController : WebApiController
         };
     }
 
-    // ── GET /api/log ──────────────────────────────────────────────────────────
     [Route(HttpVerbs.Get, "/log")]
     public object GetLog() => new
     {
         entries = DebugServer.LogBuffer.ToArray(),
     };
 
-    // ── GET /api/filecheck?path=xxx ──────────────────────────────────────────
     [Route(HttpVerbs.Get, "/filecheck")]
     public object GetFileCheck()
     {
@@ -320,7 +304,33 @@ internal sealed class ApiController : WebApiController
         };
     }
 
-    // ── GET /api/player/resources ───────────────────────────────────────────
+    [Route(HttpVerbs.Get, "/player/trees")]
+    public object GetPlayerTrees()
+    {
+        var trees = _penumbra.GetPlayerTrees();
+        if (trees == null)
+            return new { error = "Penumbra not available" };
+
+        return trees.ToDictionary(
+            kvp => $"obj_{kvp.Key}",
+            kvp => new
+            {
+                name = kvp.Value.Name,
+                raceCode = kvp.Value.RaceCode,
+                nodes = kvp.Value.Nodes.Select(SerializeNode).ToList(),
+            });
+    }
+
+    private static object SerializeNode(ResourceNodeDto n) => new
+    {
+        type = n.Type.ToString(),
+        icon = n.Icon.ToString(),
+        name = n.Name,
+        gamePath = n.GamePath,
+        actualPath = n.ActualPath,
+        children = n.Children.Select(SerializeNode).ToList(),
+    };
+
     [Route(HttpVerbs.Get, "/player/resources")]
     public object GetPlayerResources()
     {
@@ -345,16 +355,6 @@ internal sealed class ApiController : WebApiController
 
     // ── helpers ───────────────────────────────────────────────────────────────
 
-    private static List<object> SerializeLayers(DecalProject project)
-    {
-        var list = new List<object>(project.Layers.Count);
-        foreach (var l in project.Layers)
-            list.Add(SerializeLayer(l));
-        return list;
-    }
-
-    private List<object> SerializeLayers() => SerializeLayers(_project);
-
     private static object SerializeLayer(DecalLayer l) => new
     {
         name                    = l.Name,
@@ -366,10 +366,13 @@ internal sealed class ApiController : WebApiController
         blendMode               = l.BlendMode.ToString(),
         isVisible               = l.IsVisible,
         affectsDiffuse          = l.AffectsDiffuse,
-        affectsMask             = l.AffectsMask,
+        affectsEmissive         = l.AffectsEmissive,
+        emissiveColor           = new { r = l.EmissiveColor.X, g = l.EmissiveColor.Y, b = l.EmissiveColor.Z },
+        emissiveIntensity       = l.EmissiveIntensity,
+        emissiveMask            = l.EmissiveMask.ToString(),
+        emissiveMaskFalloff     = l.EmissiveMaskFalloff,
     };
 
-    // Partial-update a layer from a JSON body — only set properties that are present.
     private static void ApplyPartialUpdate(DecalLayer layer, string json)
     {
         JsonDocument doc;
@@ -408,9 +411,22 @@ internal sealed class ApiController : WebApiController
         if (root.TryGetProperty("affectsDiffuse", out v) && v.ValueKind is JsonValueKind.True or JsonValueKind.False)
             layer.AffectsDiffuse = v.GetBoolean();
 
-        if (root.TryGetProperty("affectsMask", out v) && v.ValueKind is JsonValueKind.True or JsonValueKind.False)
-            layer.AffectsMask = v.GetBoolean();
+        if (root.TryGetProperty("affectsEmissive", out v) && v.ValueKind is JsonValueKind.True or JsonValueKind.False)
+            layer.AffectsEmissive = v.GetBoolean();
 
+        if (root.TryGetProperty("emissiveIntensity", out v) && v.ValueKind == JsonValueKind.Number)
+            layer.EmissiveIntensity = v.GetSingle();
+
+        if (root.TryGetProperty("emissiveColor", out v))
+        {
+            if (v.ValueKind == JsonValueKind.Object)
+            {
+                float r = v.TryGetProperty("r", out var vr) ? vr.GetSingle() : layer.EmissiveColor.X;
+                float g = v.TryGetProperty("g", out var vg) ? vg.GetSingle() : layer.EmissiveColor.Y;
+                float b = v.TryGetProperty("b", out var vb) ? vb.GetSingle() : layer.EmissiveColor.Z;
+                layer.EmissiveColor = new Vector3(r, g, b);
+            }
+        }
     }
 
     private static Vector2 ReadVector2(JsonElement el, Vector2 fallback)

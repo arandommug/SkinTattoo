@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Numerics;
 using Dalamud.Plugin.Services;
+using Lumina.Data.Files;
 using SkinTatoo.Core;
 using SkinTatoo.Http;
 using SkinTatoo.Interop;
@@ -22,24 +23,6 @@ public class PreviewService : IDisposable
     private readonly string outputDir;
     private bool disposed;
 
-    // Cached original textures — loaded once per path, reused for every preview
-    private byte[]? cachedBaseRgba;
-    private string? cachedBasePath;
-    private int cachedBaseW, cachedBaseH;
-    private byte[]? cachedNormRgba;
-    private string? cachedNormPath;
-    private byte[]? cachedMaskRgba;
-    private string? cachedMaskPath;
-
-    public bool IsReady => currentMesh != null;
-
-    public void ClearTextureCache()
-    {
-        cachedBaseRgba = null; cachedBasePath = null; cachedBaseW = 0; cachedBaseH = 0;
-        cachedNormRgba = null; cachedNormPath = null;
-        cachedMaskRgba = null; cachedMaskPath = null;
-        DebugServer.AppendLog("[PreviewService] Texture cache cleared");
-    }
     public MeshData? CurrentMesh => currentMesh;
 
     public PreviewService(
@@ -60,7 +43,6 @@ public class PreviewService : IDisposable
         Directory.CreateDirectory(outputDir);
     }
 
-    // Synchronous — must be called from a thread that can access Dalamud IDataManager
     public bool LoadMesh(string gameMdlPath)
     {
         DebugServer.AppendLog($"[PreviewService] LoadMesh: {gameMdlPath}");
@@ -72,77 +54,38 @@ public class PreviewService : IDisposable
         }
         catch (Exception ex)
         {
-            var msg = $"LoadMesh exception: {ex.Message}";
-            log.Error(ex, msg);
-            DebugServer.AppendLog($"[PreviewService] {msg}");
+            log.Error(ex, $"LoadMesh exception: {ex.Message}");
+            DebugServer.AppendLog($"[PreviewService] LoadMesh exception: {ex.Message}");
             return false;
         }
 
         if (meshData == null)
         {
-            var msg = $"LoadMesh failed: ExtractMesh returned null for {gameMdlPath}";
-            log.Error(msg);
-            DebugServer.AppendLog($"[PreviewService] {msg}");
+            log.Error($"LoadMesh failed: ExtractMesh returned null for {gameMdlPath}");
+            DebugServer.AppendLog($"[PreviewService] LoadMesh failed for {gameMdlPath}");
             return false;
         }
 
         currentMesh = meshData;
-
-        var info = $"Mesh loaded: {meshData.Vertices.Length} verts, {meshData.TriangleCount} tris";
-        log.Information(info);
-        DebugServer.AppendLog($"[PreviewService] {info}");
+        DebugServer.AppendLog($"[PreviewService] Mesh loaded: {meshData.Vertices.Length} verts, {meshData.TriangleCount} tris");
         return true;
     }
 
-    public record TextureTargets(
-        string? DiffuseGamePath, string? DiffuseDiskPath,
-        string? NormGamePath, string? NormDiskPath,
-        string? MaskGamePath, string? MaskDiskPath);
-
-    public string? UpdatePreview(DecalProject project, TextureTargets targets)
+    /// <summary>Update preview for all target groups in the project.</summary>
+    public void UpdatePreview(DecalProject project)
     {
-        DebugServer.AppendLog($"[PreviewService] UpdatePreview: layers={project.Layers.Count}");
-
-        if (!IsReady)
-        {
-            DebugServer.AppendLog("[PreviewService] Not ready");
-            return null;
-        }
-
-        // Load base texture at native resolution — don't force resize
-        var baseTex = LoadAndCacheNative(ref cachedBaseRgba, ref cachedBasePath, ref cachedBaseW, ref cachedBaseH, targets.DiffuseDiskPath, "diffuse");
-        int w = cachedBaseW > 0 ? cachedBaseW : config.TextureResolution;
-        int h = cachedBaseH > 0 ? cachedBaseH : config.TextureResolution;
-
-        var normTex = LoadAndCache(ref cachedNormRgba, ref cachedNormPath, targets.NormDiskPath, w, h, "normal");
-        var maskTex = LoadAndCache(ref cachedMaskRgba, ref cachedMaskPath, targets.MaskDiskPath, w, h, "mask");
+        DebugServer.AppendLog($"[PreviewService] UpdatePreview: {project.Groups.Count} groups");
 
         try
         {
-            // Composite diffuse
-            var diffResult = CpuUvComposite(project, baseTex, w, h, "diffuse");
-
-            // Composite mask (glow/specular)
-            var maskResult = CpuUvCompositeMask(project, maskTex, w, h);
-
-            // Collect all redirects and apply in a single Penumbra call
-            // (multiple calls with the same tag would overwrite each other)
             var redirects = new Dictionary<string, string>();
 
-            if (diffResult != null && !string.IsNullOrEmpty(targets.DiffuseGamePath))
+            foreach (var group in project.Groups)
             {
-                var path = Path.Combine(outputDir, "preview_d.tex");
-                WriteBgraTexFile(path, diffResult, w, h);
-                redirects[targets.DiffuseGamePath] = path;
-                DebugServer.AppendLog($"[PreviewService] Diffuse → {targets.DiffuseGamePath}");
-            }
+                if (string.IsNullOrEmpty(group.DiffuseGamePath)) continue;
+                if (group.Layers.Count == 0) continue;
 
-            if (maskResult != null && !string.IsNullOrEmpty(targets.MaskGamePath))
-            {
-                var path = Path.Combine(outputDir, "preview_m.tex");
-                WriteBgraTexFile(path, maskResult, w, h);
-                redirects[targets.MaskGamePath] = path;
-                DebugServer.AppendLog($"[PreviewService] Mask → {targets.MaskGamePath}");
+                ProcessGroup(group, redirects);
             }
 
             if (redirects.Count > 0)
@@ -150,213 +93,114 @@ public class PreviewService : IDisposable
 
             penumbra.RedrawPlayer();
             DebugServer.AppendLog($"[PreviewService] Preview updated ({redirects.Count} redirects)");
-            return Path.Combine(outputDir, "preview_d.tex");
         }
         catch (Exception ex)
         {
             DebugServer.AppendLog($"[PreviewService] UpdatePreview exception: {ex.Message}");
             log.Error(ex, "UpdatePreview failed");
-            return null;
         }
     }
 
-
-    // Load texture from game path — try sqpack via Meddle, then decode with Lumina
-    private (byte[] Data, int Width, int Height)? LoadGameTexture(string gamePath)
+    private void ProcessGroup(TargetGroup group, Dictionary<string, string> redirects)
     {
-        try
-        {
-            var pack = meshExtractor.GetSqPackInstance();
-            if (pack == null) return null;
+        var diffuseDisk = group.OrigDiffuseDiskPath ?? group.DiffuseDiskPath;
+        var baseTex = LoadTexture(diffuseDisk);
+        int w, h;
+        byte[] baseData;
 
-            var sqResult = pack.GetFile(gamePath);
-            if (sqResult == null)
+        if (baseTex != null)
+        {
+            (baseData, w, h) = baseTex.Value;
+        }
+        else
+        {
+            w = h = config.TextureResolution;
+            baseData = new byte[w * h * 4];
+        }
+
+        // Diffuse composite
+        var diffResult = CpuUvComposite(group.Layers, baseData, w, h);
+        if (diffResult != null)
+        {
+            var safeName = MakeSafeFileName(group.Name);
+            var path = Path.Combine(outputDir, $"preview_{safeName}_d.tex");
+            WriteBgraTexFile(path, diffResult, w, h);
+            redirects[group.DiffuseGamePath!] = path;
+            DebugServer.AppendLog($"[PreviewService] Diffuse → {group.DiffuseGamePath}");
+        }
+
+        // Emissive: modify .mtrl + write emissive area into normal map alpha
+        var hasEmissive = group.HasEmissiveLayers();
+        if (hasEmissive && !string.IsNullOrEmpty(group.MtrlGamePath))
+        {
+            var emissiveColor = GetCombinedEmissiveColor(group.Layers);
+            var safeName = MakeSafeFileName(group.Name);
+            var mtrlOutPath = Path.Combine(outputDir, $"preview_{safeName}.mtrl");
+            var mtrlDisk = group.OrigMtrlDiskPath ?? group.MtrlDiskPath;
+
+            if (TryBuildEmissiveMtrl(mtrlDisk ?? group.MtrlGamePath!, mtrlOutPath, emissiveColor))
             {
-                DebugServer.AppendLog($"[PreviewService] Game texture not found in sqpack: {gamePath}");
-                return null;
+                redirects[group.MtrlGamePath!] = mtrlOutPath;
+                DebugServer.AppendLog($"[PreviewService] Mtrl (emissive) → {group.MtrlGamePath}");
             }
 
-            var rawBytes = sqResult.Value.file.RawData.ToArray();
-            DebugServer.AppendLog($"[PreviewService] Game texture raw: {rawBytes.Length} bytes");
-
-            // Write to temp file, then use Lumina GetFileFromDisk to decode BC compression
-            var tempPath = Path.Combine(outputDir, "temp_base.tex");
-            File.WriteAllBytes(tempPath, rawBytes);
-            var result = imageLoader.LoadImage(tempPath);
-            try { File.Delete(tempPath); } catch { }
-
-            if (result != null)
-                DebugServer.AppendLog($"[PreviewService] Game texture decoded: {result.Value.Width}x{result.Value.Height}");
-
-            return result;
-        }
-        catch (Exception ex)
-        {
-            DebugServer.AppendLog($"[PreviewService] Game texture load failed: {ex.GetType().Name}: {ex.Message}");
-            return null;
-        }
-    }
-
-    // Load texture at native resolution (no resize)
-    private byte[] LoadAndCacheNative(ref byte[]? cached, ref string? cachedPath, ref int cachedW, ref int cachedH, string? diskPath, string label)
-    {
-        if (cached != null)
-            return cached;
-
-        cachedPath = diskPath;
-
-        if (!string.IsNullOrEmpty(diskPath))
-        {
-            var img = File.Exists(diskPath)
-                ? imageLoader.LoadImage(diskPath)
-                : LoadGameTexture(diskPath);
-
-            if (img != null)
+            // Write emissive area into normal map alpha channel
+            if (!string.IsNullOrEmpty(group.NormGamePath) && !string.IsNullOrEmpty(group.NormDiskPath))
             {
-                var (data, iw, ih) = img.Value;
-                cached = data;
-                cachedW = iw;
-                cachedH = ih;
-                DebugServer.AppendLog($"[PreviewService] Cached {label} (native): {iw}x{ih}");
-            }
-        }
-
-        if (cached == null)
-        {
-            cachedW = config.TextureResolution;
-            cachedH = config.TextureResolution;
-            cached = new byte[cachedW * cachedH * 4];
-        }
-        return cached;
-    }
-
-    private byte[] LoadAndCache(ref byte[]? cached, ref string? cachedPath, string? diskPath, int w, int h, string label)
-    {
-        if (cached != null)
-            return cached;
-
-        cachedPath = diskPath;
-
-        if (!string.IsNullOrEmpty(diskPath))
-        {
-            var img = File.Exists(diskPath)
-                ? imageLoader.LoadImage(diskPath)
-                : LoadGameTexture(diskPath);
-
-            if (img != null)
-            {
-                var (data, iw, ih) = img.Value;
-                cached = (iw != w || ih != h) ? ResizeBilinear(data, iw, ih, w, h) : data;
-                DebugServer.AppendLog($"[PreviewService] Cached {label}: {iw}x{ih} → {w}x{h}");
-            }
-        }
-
-        cached ??= new byte[w * h * 4];
-        return cached;
-    }
-
-    // UV-space decal compositing — places decal directly onto UV map
-    private byte[]? CpuUvComposite(DecalProject project, byte[] baseRgba, int w, int h, string channel = "diffuse")
-    {
-        var output = (byte[])baseRgba.Clone();
-        int processedLayers = 0;
-
-        foreach (var layer in project.Layers)
-        {
-            if (!layer.IsVisible || string.IsNullOrEmpty(layer.ImagePath)) continue;
-            if (channel == "diffuse" && !layer.AffectsDiffuse) continue;
-
-            var decalImage = imageLoader.LoadImage(layer.ImagePath);
-            if (decalImage == null) continue;
-
-            var (decalData, decalW, decalH) = decalImage.Value;
-            var center = layer.UvCenter;
-            var scale = layer.UvScale;
-            var opacity = layer.Opacity;
-            var rotRad = layer.RotationDeg * (MathF.PI / 180f);
-            var cosR = MathF.Cos(rotRad);
-            var sinR = MathF.Sin(rotRad);
-
-            // Decal covers UV rect: center +/- scale/2
-            float uMin = center.X - scale.X / 2f;
-            float uMax = center.X + scale.X / 2f;
-            float vMin = center.Y - scale.Y / 2f;
-            float vMax = center.Y + scale.Y / 2f;
-
-            // Pixel range in output texture
-            int pxMin = Math.Max(0, (int)(uMin * w));
-            int pxMax = Math.Min(w - 1, (int)(uMax * w));
-            int pyMin = Math.Max(0, (int)(vMin * h));
-            int pyMax = Math.Min(h - 1, (int)(vMax * h));
-
-            int hitPixels = 0;
-
-            for (int py = pyMin; py <= pyMax; py++)
-            {
-                for (int px = pxMin; px <= pxMax; px++)
+                var normDisk = group.OrigNormDiskPath ?? group.NormDiskPath;
+                var normResult = CompositeEmissiveNorm(group.Layers, normDisk!, w, h);
+                if (normResult != null)
                 {
-                    // Current UV coordinate
-                    float u = (px + 0.5f) / w;
-                    float v = (py + 0.5f) / h;
-
-                    // Transform to decal-local coordinates [-0.5, 0.5]
-                    float lu = (u - center.X) / scale.X;
-                    float lv = (v - center.Y) / scale.Y;
-
-                    // Apply rotation
-                    float ru = lu * cosR + lv * sinR;
-                    float rv = -lu * sinR + lv * cosR;
-
-                    // Check if within decal bounds [-0.5, 0.5]
-                    if (ru < -0.5f || ru > 0.5f || rv < -0.5f || rv > 0.5f) continue;
-
-                    // Map to decal image coordinates and bilinear sample
-                    float du = (ru + 0.5f) * decalW - 0.5f;
-                    float dv = (rv + 0.5f) * decalH - 0.5f;
-
-                    SampleBilinear(decalData, decalW, decalH, du, dv,
-                        out float dr, out float dg, out float db, out float da);
-                    da *= opacity;
-
-                    if (da < 0.001f) continue;
-
-                    // Alpha blend
-                    int oIdx = (py * w + px) * 4;
-                    float br = output[oIdx] / 255f;
-                    float bg = output[oIdx + 1] / 255f;
-                    float bb = output[oIdx + 2] / 255f;
-
-                    output[oIdx]     = (byte)Math.Clamp((int)((dr * da + br * (1 - da)) * 255), 0, 255);
-                    output[oIdx + 1] = (byte)Math.Clamp((int)((dg * da + bg * (1 - da)) * 255), 0, 255);
-                    output[oIdx + 2] = (byte)Math.Clamp((int)((db * da + bb * (1 - da)) * 255), 0, 255);
-                    output[oIdx + 3] = 255;
-
-                    hitPixels++;
+                    var normPath = Path.Combine(outputDir, $"preview_{safeName}_n.tex");
+                    WriteBgraTexFile(normPath, normResult, w, h);
+                    redirects[group.NormGamePath!] = normPath;
+                    DebugServer.AppendLog($"[PreviewService] Norm (emissive alpha) → {group.NormGamePath}");
                 }
             }
-
-            DebugServer.AppendLog($"[PreviewService] UV composite: layer '{layer.Name}' hit {hitPixels} pixels, center=({center.X:F2},{center.Y:F2}) scale=({scale.X:F2},{scale.Y:F2})");
-            processedLayers++;
         }
-
-        if (processedLayers == 0)
-        {
-            DebugServer.AppendLog("[PreviewService] No visible layers with images");
-            return null;
-        }
-
-        return output;
     }
 
-    // UV-space mask compositing — writes specular/smoothness to the decal area
-    private byte[]? CpuUvCompositeMask(DecalProject project, byte[] baseMask, int w, int h)
+    private static string MakeSafeFileName(string name)
     {
-        var output = (byte[])baseMask.Clone();
-        bool anyMask = false;
+        var safe = name.Replace(' ', '_').Replace('/', '_').Replace('\\', '_');
+        if (safe.Length > 40) safe = safe[..40];
+        return string.IsNullOrEmpty(safe) ? "group" : safe;
+    }
 
-        foreach (var layer in project.Layers)
+    private (byte[] Data, int Width, int Height)? LoadTexture(string? diskPath)
+    {
+        if (string.IsNullOrEmpty(diskPath)) return null;
+        var img = File.Exists(diskPath) ? imageLoader.LoadImage(diskPath) : LoadGameTexture(diskPath);
+        return img;
+    }
+
+    /// <summary>
+    /// Composite emissive area into normal map alpha channel.
+    /// </summary>
+    private byte[]? CompositeEmissiveNorm(List<DecalLayer> layers, string normDiskPath, int w, int h)
+    {
+        byte[] baseNorm;
+        var normImg = File.Exists(normDiskPath) ? imageLoader.LoadImage(normDiskPath) : LoadGameTexture(normDiskPath);
+        if (normImg != null)
         {
-            if (!layer.IsVisible || !layer.AffectsMask || string.IsNullOrEmpty(layer.ImagePath)) continue;
+            var (data, iw, ih) = normImg.Value;
+            baseNorm = (iw != w || ih != h) ? ResizeBilinear(data, iw, ih, w, h) : (byte[])data.Clone();
+        }
+        else
+        {
+            baseNorm = new byte[w * h * 4];
+        }
+
+        var output = (byte[])baseNorm.Clone();
+
+        // Zero out alpha channel everywhere
+        for (int i = 3; i < output.Length; i += 4)
+            output[i] = 0;
+
+        bool anyEmissive = false;
+        foreach (var layer in layers)
+        {
+            if (!layer.IsVisible || !layer.AffectsEmissive || string.IsNullOrEmpty(layer.ImagePath)) continue;
 
             var decalImage = imageLoader.LoadImage(layer.ImagePath);
             if (decalImage == null) continue;
@@ -374,8 +218,135 @@ public class PreviewService : IDisposable
             int pyMin = Math.Max(0, (int)((center.Y - scale.Y / 2f) * h));
             int pyMax = Math.Min(h - 1, (int)((center.Y + scale.Y / 2f) * h));
 
-            byte specByte = (byte)Math.Clamp((int)(layer.GlowSpecular * 255), 0, 255);
-            byte smoothByte = (byte)Math.Clamp((int)((1f - layer.GlowSmoothness) * 255), 0, 255); // roughness = 1 - smoothness
+            for (int py = pyMin; py <= pyMax; py++)
+            {
+                for (int px = pxMin; px <= pxMax; px++)
+                {
+                    float u = (px + 0.5f) / w;
+                    float v = (py + 0.5f) / h;
+                    float lu = (u - center.X) / scale.X;
+                    float lv = (v - center.Y) / scale.Y;
+                    float ru = lu * cosR + lv * sinR;
+                    float rv = -lu * sinR + lv * cosR;
+                    if (ru < -0.5f || ru > 0.5f || rv < -0.5f || rv > 0.5f) continue;
+
+                    float du = (ru + 0.5f) * decalW - 0.5f;
+                    float dv = (rv + 0.5f) * decalH - 0.5f;
+                    SampleBilinear(decalData, decalW, decalH, du, dv, out _, out _, out _, out float da);
+                    da *= opacity;
+                    if (da < 0.001f) continue;
+
+                    float maskValue = ComputeEmissiveMask(layer.EmissiveMask, layer.EmissiveMaskFalloff, ru, rv, da);
+
+                    int oIdx = (py * w + px) * 4;
+                    byte emByte = (byte)Math.Clamp((int)(maskValue * 255), 0, 255);
+                    output[oIdx + 3] = (byte)Math.Max(output[oIdx + 3], emByte);
+                }
+            }
+
+            anyEmissive = true;
+        }
+
+        return anyEmissive ? output : null;
+    }
+
+    private static Vector3 GetCombinedEmissiveColor(List<DecalLayer> layers)
+    {
+        var color = Vector3.Zero;
+        foreach (var layer in layers)
+        {
+            if (!layer.IsVisible || !layer.AffectsEmissive || string.IsNullOrEmpty(layer.ImagePath)) continue;
+            color += layer.EmissiveColor * layer.EmissiveIntensity;
+        }
+        return color;
+    }
+
+    private bool TryBuildEmissiveMtrl(string mtrlPath, string outputPath, Vector3 emissiveColor)
+    {
+        try
+        {
+            byte[] mtrlBytes;
+            MtrlFile mtrl;
+
+            if (File.Exists(mtrlPath))
+            {
+                mtrlBytes = File.ReadAllBytes(mtrlPath);
+            }
+            else
+            {
+                var pack = meshExtractor.GetSqPackInstance();
+                if (pack == null) return false;
+                var sqResult = pack.GetFile(mtrlPath);
+                if (sqResult == null) return false;
+                mtrlBytes = sqResult.Value.file.RawData.ToArray();
+            }
+
+            var tempPath = Path.Combine(outputDir, "temp_orig.mtrl");
+            File.WriteAllBytes(tempPath, mtrlBytes);
+            var lumina = meshExtractor.GetLuminaForDisk();
+            mtrl = lumina!.GetFileFromDisk<MtrlFile>(tempPath);
+            try { File.Delete(tempPath); } catch { }
+
+            DebugServer.AppendLog($"[PreviewService] Loaded mtrl: {mtrlPath} ({mtrlBytes.Length} bytes)");
+            return MtrlFileWriter.WriteEmissiveMtrl(mtrl, mtrlBytes, outputPath, emissiveColor);
+        }
+        catch (Exception ex)
+        {
+            DebugServer.AppendLog($"[PreviewService] Emissive mtrl build failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    private (byte[] Data, int Width, int Height)? LoadGameTexture(string gamePath)
+    {
+        try
+        {
+            var pack = meshExtractor.GetSqPackInstance();
+            if (pack == null) return null;
+            var sqResult = pack.GetFile(gamePath);
+            if (sqResult == null) return null;
+
+            var rawBytes = sqResult.Value.file.RawData.ToArray();
+            var tempPath = Path.Combine(outputDir, "temp_base.tex");
+            File.WriteAllBytes(tempPath, rawBytes);
+            var result = imageLoader.LoadImage(tempPath);
+            try { File.Delete(tempPath); } catch { }
+            return result;
+        }
+        catch (Exception ex)
+        {
+            DebugServer.AppendLog($"[PreviewService] Game texture load failed: {ex.Message}");
+            return null;
+        }
+    }
+
+    private byte[]? CpuUvComposite(List<DecalLayer> layers, byte[] baseRgba, int w, int h)
+    {
+        var output = (byte[])baseRgba.Clone();
+        int processedLayers = 0;
+
+        foreach (var layer in layers)
+        {
+            if (!layer.IsVisible || string.IsNullOrEmpty(layer.ImagePath)) continue;
+            if (!layer.AffectsDiffuse) continue;
+
+            var decalImage = imageLoader.LoadImage(layer.ImagePath);
+            if (decalImage == null) continue;
+
+            var (decalData, decalW, decalH) = decalImage.Value;
+            var center = layer.UvCenter;
+            var scale = layer.UvScale;
+            var opacity = layer.Opacity;
+            var rotRad = layer.RotationDeg * (MathF.PI / 180f);
+            var cosR = MathF.Cos(rotRad);
+            var sinR = MathF.Sin(rotRad);
+
+            int pxMin = Math.Max(0, (int)((center.X - scale.X / 2f) * w));
+            int pxMax = Math.Min(w - 1, (int)((center.X + scale.X / 2f) * w));
+            int pyMin = Math.Max(0, (int)((center.Y - scale.Y / 2f) * h));
+            int pyMax = Math.Min(h - 1, (int)((center.Y + scale.Y / 2f) * h));
+
+            int hitPixels = 0;
 
             for (int py = pyMin; py <= pyMax; py++)
             {
@@ -389,44 +360,57 @@ public class PreviewService : IDisposable
                     float rv = -lu * sinR + lv * cosR;
                     if (ru < -0.5f || ru > 0.5f || rv < -0.5f || rv > 0.5f) continue;
 
-                    // Use decal alpha to determine glow area
-                    int sx = Math.Clamp((int)((ru + 0.5f) * decalW), 0, decalW - 1);
-                    int sy = Math.Clamp((int)((rv + 0.5f) * decalH), 0, decalH - 1);
-                    float da = (decalData[(sy * decalW + sx) * 4 + 3] / 255f) * opacity;
+                    float du = (ru + 0.5f) * decalW - 0.5f;
+                    float dv = (rv + 0.5f) * decalH - 0.5f;
+
+                    SampleBilinear(decalData, decalW, decalH, du, dv,
+                        out float dr, out float dg, out float db, out float da);
+                    da *= opacity;
+
                     if (da < 0.001f) continue;
 
-                    // Mask format: R=specular, G=roughness, B=SSS
                     int oIdx = (py * w + px) * 4;
-                    output[oIdx] = (byte)Math.Clamp((int)(specByte * da + output[oIdx] * (1 - da)), 0, 255);       // R: specular
-                    output[oIdx + 1] = (byte)Math.Clamp((int)(smoothByte * da + output[oIdx + 1] * (1 - da)), 0, 255); // G: roughness
-                    // B (SSS) and A unchanged
+                    float br = output[oIdx] / 255f;
+                    float bg = output[oIdx + 1] / 255f;
+                    float bb = output[oIdx + 2] / 255f;
+
+                    output[oIdx]     = (byte)Math.Clamp((int)((dr * da + br * (1 - da)) * 255), 0, 255);
+                    output[oIdx + 1] = (byte)Math.Clamp((int)((dg * da + bg * (1 - da)) * 255), 0, 255);
+                    output[oIdx + 2] = (byte)Math.Clamp((int)((db * da + bb * (1 - da)) * 255), 0, 255);
+                    output[oIdx + 3] = 255;
+
+                    hitPixels++;
                 }
             }
 
-            DebugServer.AppendLog($"[PreviewService] Mask composite: layer '{layer.Name}', spec={layer.GlowSpecular:F2}, smooth={layer.GlowSmoothness:F2}");
-            anyMask = true;
+            DebugServer.AppendLog($"[PreviewService] UV composite: layer '{layer.Name}' hit {hitPixels} pixels");
+            processedLayers++;
         }
 
-        return anyMask ? output : null;
+        if (processedLayers == 0)
+        {
+            DebugServer.AppendLog("[PreviewService] No visible layers with images");
+            return null;
+        }
+
+        return output;
     }
 
-    // Write BGRA .tex file directly from RGBA byte array
     private static void WriteBgraTexFile(string path, byte[] rgbaData, int width, int height)
     {
         using var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read);
         using var bw = new BinaryWriter(fs);
 
-        bw.Write(0x00800000u); // TextureType2D
-        bw.Write(0x1450u);     // B8G8R8A8 format
+        bw.Write(0x00800000u);
+        bw.Write(0x1450u);
         bw.Write((ushort)width);
         bw.Write((ushort)height);
-        bw.Write((ushort)1);   // depth
-        bw.Write((ushort)1);   // mip count
-        bw.Write(0u); bw.Write(0u); bw.Write(0u); // LOD offsets
-        bw.Write(80u); // surface 0 offset
+        bw.Write((ushort)1);
+        bw.Write((ushort)1);
+        bw.Write(0u); bw.Write(0u); bw.Write(0u);
+        bw.Write(80u);
         for (int i = 1; i < 13; i++) bw.Write(0u);
 
-        // Write pixels as BGRA
         for (int i = 0; i < rgbaData.Length; i += 4)
         {
             bw.Write(rgbaData[i + 2]); // B
@@ -461,6 +445,48 @@ public class PreviewService : IDisposable
         a = Lerp(3) / 255f;
     }
 
+    /// <summary>
+    /// Compute emissive mask value based on position within the decal.
+    /// </summary>
+    public static float ComputeEmissiveMask(EmissiveMask mask, float falloff, float ru, float rv, float da)
+    {
+        if (mask == Core.EmissiveMask.Uniform)
+            return da;
+
+        float dist = MathF.Sqrt(ru * ru + rv * rv) * 2f;
+        dist = MathF.Min(dist, 1f);
+
+        float edgeDist = MathF.Min(0.5f - MathF.Abs(ru), 0.5f - MathF.Abs(rv));
+        edgeDist = MathF.Max(edgeDist, 0f) * 2f;
+
+        float f = MathF.Max(falloff, 0.01f);
+        float m;
+
+        switch (mask)
+        {
+            case Core.EmissiveMask.RadialFadeOut:
+                m = 1f - Smoothstep(0f, f, dist);
+                break;
+            case Core.EmissiveMask.RadialFadeIn:
+                m = Smoothstep(1f - f, 1f, dist);
+                break;
+            case Core.EmissiveMask.EdgeGlow:
+                m = 1f - Smoothstep(0f, f, edgeDist);
+                break;
+            default:
+                m = 1f;
+                break;
+        }
+
+        return da * m;
+    }
+
+    private static float Smoothstep(float edge0, float edge1, float x)
+    {
+        float t = MathF.Max(0f, MathF.Min(1f, (x - edge0) / (edge1 - edge0 + 1e-6f)));
+        return t * t * (3f - 2f * t);
+    }
+
     private static byte[] ResizeBilinear(byte[] src, int srcW, int srcH, int dstW, int dstH)
     {
         var dst = new byte[dstW * dstH * 4];
@@ -470,16 +496,20 @@ public class PreviewService : IDisposable
             for (var x = 0; x < dstW; x++)
             {
                 float fx = (x + 0.5f) * srcW / dstW - 0.5f;
-                SampleBilinear(src, srcW, srcH, fx, fy,
-                    out float r, out float g, out float b, out float a);
-                var dstIdx = (y * dstW + x) * 4;
-                dst[dstIdx]     = (byte)Math.Clamp((int)(r * 255 + 0.5f), 0, 255);
-                dst[dstIdx + 1] = (byte)Math.Clamp((int)(g * 255 + 0.5f), 0, 255);
-                dst[dstIdx + 2] = (byte)Math.Clamp((int)(b * 255 + 0.5f), 0, 255);
-                dst[dstIdx + 3] = (byte)Math.Clamp((int)(a * 255 + 0.5f), 0, 255);
+                SampleBilinear(src, srcW, srcH, fx, fy, out float r, out float g, out float b, out float a);
+                var i = (y * dstW + x) * 4;
+                dst[i]     = (byte)Math.Clamp((int)(r * 255 + 0.5f), 0, 255);
+                dst[i + 1] = (byte)Math.Clamp((int)(g * 255 + 0.5f), 0, 255);
+                dst[i + 2] = (byte)Math.Clamp((int)(b * 255 + 0.5f), 0, 255);
+                dst[i + 3] = (byte)Math.Clamp((int)(a * 255 + 0.5f), 0, 255);
             }
         }
         return dst;
+    }
+
+    public void ClearTextureCache()
+    {
+        DebugServer.AppendLog("[PreviewService] Texture cache cleared");
     }
 
     public void Dispose()

@@ -19,32 +19,45 @@ public class SavedLayer
     public int BlendMode { get; set; }
     public bool IsVisible { get; set; } = true;
     public bool AffectsDiffuse { get; set; } = true;
-    public bool AffectsMask { get; set; }
-    public float GlowSpecular { get; set; } = 0.8f;
-    public float GlowSmoothness { get; set; } = 0.8f;
+
+    // Emissive
+    public bool AffectsEmissive { get; set; }
+    public float EmissiveColorR { get; set; } = 1f;
+    public float EmissiveColorG { get; set; } = 1f;
+    public float EmissiveColorB { get; set; } = 1f;
+    public float EmissiveIntensity { get; set; } = 1f;
+    public int EmissiveMask { get; set; }
+    public float EmissiveMaskFalloff { get; set; } = 0.5f;
+}
+
+[Serializable]
+public class SavedTargetGroup
+{
+    public string Name { get; set; } = "";
+    public string? DiffuseGamePath { get; set; }
+    public string? DiffuseDiskPath { get; set; }
+    public string? NormGamePath { get; set; }
+    public string? NormDiskPath { get; set; }
+    public string? MtrlGamePath { get; set; }
+    public string? MtrlDiskPath { get; set; }
+    public string? MeshDiskPath { get; set; }
+    public string? OrigDiffuseDiskPath { get; set; }
+    public string? OrigNormDiskPath { get; set; }
+    public string? OrigMtrlDiskPath { get; set; }
+    public List<SavedLayer> Layers { get; set; } = [];
 }
 
 [Serializable]
 public class Configuration : IPluginConfiguration
 {
-    public int Version { get; set; } = 1;
+    public int Version { get; set; } = 2;
     public int HttpPort { get; set; } = 14780;
     public int TextureResolution { get; set; } = 1024;
-    public Core.SkinTarget LastTarget { get; set; } = Core.SkinTarget.Body;
 
-    public List<SavedLayer> Layers { get; set; } = [];
+    public List<SavedTargetGroup> TargetGroups { get; set; } = [];
+
     public bool MainWindowOpen { get; set; }
     public bool DebugWindowOpen { get; set; }
-
-    // User-selected target paths (set via debug window)
-    public string? TargetTextureGamePath { get; set; }
-    public string? TargetTextureDiskPath { get; set; }
-    public string? TargetNormGamePath { get; set; }
-    public string? TargetNormDiskPath { get; set; }
-    public string? TargetMaskGamePath { get; set; }
-    public string? TargetMaskDiskPath { get; set; }
-    public string? TargetMeshDiskPath { get; set; }
-
     public string? LastImageDir { get; set; }
     public bool AutoPreview { get; set; }
 

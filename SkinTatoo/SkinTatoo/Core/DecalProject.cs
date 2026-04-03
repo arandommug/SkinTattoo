@@ -3,104 +3,129 @@ using System.Numerics;
 
 namespace SkinTatoo.Core;
 
-public enum SkinTarget
-{
-    Body,
-    Face,
-}
-
 public class DecalProject
 {
-    public List<DecalLayer> Layers { get; } = [];
-    public SkinTarget Target { get; set; } = SkinTarget.Body;
-    public int SelectedLayerIndex { get; set; } = -1;
+    public List<TargetGroup> Groups { get; } = [];
+    public int SelectedGroupIndex { get; set; } = -1;
 
-    public DecalLayer? SelectedLayer =>
-        SelectedLayerIndex >= 0 && SelectedLayerIndex < Layers.Count
-            ? Layers[SelectedLayerIndex]
-            : null;
+    public TargetGroup? SelectedGroup =>
+        SelectedGroupIndex >= 0 && SelectedGroupIndex < Groups.Count
+            ? Groups[SelectedGroupIndex] : null;
 
-    public DecalLayer AddLayer(string name = "New Decal")
+    public DecalLayer? SelectedLayer => SelectedGroup?.SelectedLayer;
+
+    public TargetGroup AddGroup(string name)
     {
-        var layer = new DecalLayer { Name = name };
-        Layers.Add(layer);
-        SelectedLayerIndex = Layers.Count - 1;
-        return layer;
+        var group = new TargetGroup { Name = name };
+        Groups.Add(group);
+        SelectedGroupIndex = Groups.Count - 1;
+        return group;
     }
 
-    public void RemoveLayer(int index)
+    public void RemoveGroup(int index)
     {
-        if (index < 0 || index >= Layers.Count) return;
-        Layers.RemoveAt(index);
-        if (SelectedLayerIndex >= Layers.Count)
-            SelectedLayerIndex = Layers.Count - 1;
+        if (index < 0 || index >= Groups.Count) return;
+        Groups.RemoveAt(index);
+        if (SelectedGroupIndex >= Groups.Count)
+            SelectedGroupIndex = Groups.Count - 1;
     }
 
-    public void MoveLayerUp(int index)
+    public bool HasEmissiveLayers()
     {
-        if (index <= 0 || index >= Layers.Count) return;
-        (Layers[index], Layers[index - 1]) = (Layers[index - 1], Layers[index]);
-        if (SelectedLayerIndex == index) SelectedLayerIndex = index - 1;
-        else if (SelectedLayerIndex == index - 1) SelectedLayerIndex = index;
-    }
-
-    public void MoveLayerDown(int index)
-    {
-        if (index < 0 || index >= Layers.Count - 1) return;
-        (Layers[index], Layers[index + 1]) = (Layers[index + 1], Layers[index]);
-        if (SelectedLayerIndex == index) SelectedLayerIndex = index + 1;
-        else if (SelectedLayerIndex == index + 1) SelectedLayerIndex = index;
+        foreach (var g in Groups)
+            if (g.HasEmissiveLayers()) return true;
+        return false;
     }
 
     public void SaveToConfig(Configuration config)
     {
-        config.Layers.Clear();
-        config.LastTarget = Target;
-        foreach (var l in Layers)
+        config.TargetGroups.Clear();
+        foreach (var g in Groups)
         {
-            config.Layers.Add(new SavedLayer
+            var sg = new SavedTargetGroup
             {
-                Name = l.Name,
-                ImagePath = l.ImagePath,
-                UvCenterX = l.UvCenter.X,
-                UvCenterY = l.UvCenter.Y,
-                UvScaleX = l.UvScale.X,
-                UvScaleY = l.UvScale.Y,
-                RotationDeg = l.RotationDeg,
-                Opacity = l.Opacity,
-                BlendMode = (int)l.BlendMode,
-                IsVisible = l.IsVisible,
-                AffectsDiffuse = l.AffectsDiffuse,
-                AffectsMask = l.AffectsMask,
-                GlowSpecular = l.GlowSpecular,
-                GlowSmoothness = l.GlowSmoothness,
-            });
+                Name = g.Name,
+                DiffuseGamePath = g.DiffuseGamePath,
+                DiffuseDiskPath = g.DiffuseDiskPath,
+                NormGamePath = g.NormGamePath,
+                NormDiskPath = g.NormDiskPath,
+                MtrlGamePath = g.MtrlGamePath,
+                MtrlDiskPath = g.MtrlDiskPath,
+                MeshDiskPath = g.MeshDiskPath,
+                OrigDiffuseDiskPath = g.OrigDiffuseDiskPath,
+                OrigNormDiskPath = g.OrigNormDiskPath,
+                OrigMtrlDiskPath = g.OrigMtrlDiskPath,
+            };
+            foreach (var l in g.Layers)
+            {
+                sg.Layers.Add(new SavedLayer
+                {
+                    Name = l.Name,
+                    ImagePath = l.ImagePath,
+                    UvCenterX = l.UvCenter.X,
+                    UvCenterY = l.UvCenter.Y,
+                    UvScaleX = l.UvScale.X,
+                    UvScaleY = l.UvScale.Y,
+                    RotationDeg = l.RotationDeg,
+                    Opacity = l.Opacity,
+                    BlendMode = (int)l.BlendMode,
+                    IsVisible = l.IsVisible,
+                    AffectsDiffuse = l.AffectsDiffuse,
+                    AffectsEmissive = l.AffectsEmissive,
+                    EmissiveColorR = l.EmissiveColor.X,
+                    EmissiveColorG = l.EmissiveColor.Y,
+                    EmissiveColorB = l.EmissiveColor.Z,
+                    EmissiveIntensity = l.EmissiveIntensity,
+                    EmissiveMask = (int)l.EmissiveMask,
+                    EmissiveMaskFalloff = l.EmissiveMaskFalloff,
+                });
+            }
+            config.TargetGroups.Add(sg);
         }
         config.Save();
     }
 
     public void LoadFromConfig(Configuration config)
     {
-        Layers.Clear();
-        Target = config.LastTarget;
-        foreach (var s in config.Layers)
+        Groups.Clear();
+        foreach (var sg in config.TargetGroups)
         {
-            Layers.Add(new DecalLayer
+            var g = new TargetGroup
             {
-                Name = s.Name,
-                ImagePath = s.ImagePath,
-                UvCenter = new Vector2(s.UvCenterX, s.UvCenterY),
-                UvScale = new Vector2(s.UvScaleX, s.UvScaleY),
-                RotationDeg = s.RotationDeg,
-                Opacity = s.Opacity,
-                BlendMode = (BlendMode)s.BlendMode,
-                IsVisible = s.IsVisible,
-                AffectsDiffuse = s.AffectsDiffuse,
-                AffectsMask = s.AffectsMask,
-                GlowSpecular = s.GlowSpecular,
-                GlowSmoothness = s.GlowSmoothness,
-            });
+                Name = sg.Name,
+                DiffuseGamePath = sg.DiffuseGamePath,
+                DiffuseDiskPath = sg.DiffuseDiskPath,
+                NormGamePath = sg.NormGamePath,
+                NormDiskPath = sg.NormDiskPath,
+                MtrlGamePath = sg.MtrlGamePath,
+                MtrlDiskPath = sg.MtrlDiskPath,
+                MeshDiskPath = sg.MeshDiskPath,
+                OrigDiffuseDiskPath = sg.OrigDiffuseDiskPath,
+                OrigNormDiskPath = sg.OrigNormDiskPath,
+                OrigMtrlDiskPath = sg.OrigMtrlDiskPath,
+            };
+            foreach (var s in sg.Layers)
+            {
+                g.Layers.Add(new DecalLayer
+                {
+                    Name = s.Name,
+                    ImagePath = s.ImagePath,
+                    UvCenter = new Vector2(s.UvCenterX, s.UvCenterY),
+                    UvScale = new Vector2(s.UvScaleX, s.UvScaleY),
+                    RotationDeg = s.RotationDeg,
+                    Opacity = s.Opacity,
+                    BlendMode = (BlendMode)s.BlendMode,
+                    IsVisible = s.IsVisible,
+                    AffectsDiffuse = s.AffectsDiffuse,
+                    AffectsEmissive = s.AffectsEmissive,
+                    EmissiveColor = new Vector3(s.EmissiveColorR, s.EmissiveColorG, s.EmissiveColorB),
+                    EmissiveIntensity = s.EmissiveIntensity,
+                    EmissiveMask = (EmissiveMask)s.EmissiveMask,
+                    EmissiveMaskFalloff = s.EmissiveMaskFalloff,
+                });
+            }
+            Groups.Add(g);
         }
-        SelectedLayerIndex = Layers.Count > 0 ? 0 : -1;
+        SelectedGroupIndex = Groups.Count > 0 ? 0 : -1;
     }
 }

@@ -19,6 +19,7 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService] public static ICommandManager CommandManager { get; private set; } = null!;
     [PluginService] public static IDataManager DataManager { get; private set; } = null!;
     [PluginService] public static IPluginLog Log { get; private set; } = null!;
+    [PluginService] public static IObjectTable ObjectTable { get; private set; } = null!;
 
     private const string CommandName = "/skintatoo";
 
@@ -53,7 +54,8 @@ public sealed class Plugin : IDalamudPlugin
         ICommandManager commandManager,
         IDataManager dataManager,
         ITextureProvider textureProvider,
-        IPluginLog log)
+        IPluginLog log,
+        IObjectTable objectTable)
     {
         // 1. Config
         config = pluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
@@ -82,7 +84,7 @@ public sealed class Plugin : IDalamudPlugin
         // 7. GUI
         mainWindow = new MainWindow(project, previewService, penumbra, config, textureProvider);
         configWindow = new ConfigWindow(config);
-        debugWindow = new DebugWindow(penumbra, previewService, textureProvider, config);
+        debugWindow = new DebugWindow();
 
         mainWindow.DebugWindowRef = debugWindow;
         mainWindow.OnSaveRequested += SaveProject;
@@ -112,6 +114,9 @@ public sealed class Plugin : IDalamudPlugin
 
     private void DrawUi()
     {
+        // Only draw when logged into the game world
+        if (ObjectTable.LocalPlayer == null) return;
+
         windowSystem.Draw();
 
         // Periodic auto-save

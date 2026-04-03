@@ -1,0 +1,70 @@
+using System.Collections.Generic;
+
+namespace SkinTatoo.Core;
+
+public class TargetGroup
+{
+    public string Name { get; set; } = "";
+
+    // Target paths
+    public string? DiffuseGamePath { get; set; }
+    public string? DiffuseDiskPath { get; set; }
+    public string? NormGamePath { get; set; }
+    public string? NormDiskPath { get; set; }
+    public string? MtrlGamePath { get; set; }
+    public string? MtrlDiskPath { get; set; }
+    public string? MeshDiskPath { get; set; }
+
+    // Original paths before Penumbra redirect
+    public string? OrigDiffuseDiskPath { get; set; }
+    public string? OrigNormDiskPath { get; set; }
+    public string? OrigMtrlDiskPath { get; set; }
+
+    public List<DecalLayer> Layers { get; } = [];
+    public int SelectedLayerIndex { get; set; } = -1;
+    public bool IsExpanded { get; set; } = true;
+
+    public DecalLayer? SelectedLayer =>
+        SelectedLayerIndex >= 0 && SelectedLayerIndex < Layers.Count
+            ? Layers[SelectedLayerIndex] : null;
+
+    public DecalLayer AddLayer(string name = "New Decal")
+    {
+        var layer = new DecalLayer { Name = name };
+        Layers.Add(layer);
+        SelectedLayerIndex = Layers.Count - 1;
+        return layer;
+    }
+
+    public void RemoveLayer(int index)
+    {
+        if (index < 0 || index >= Layers.Count) return;
+        Layers.RemoveAt(index);
+        if (SelectedLayerIndex >= Layers.Count)
+            SelectedLayerIndex = Layers.Count - 1;
+    }
+
+    public void MoveLayerUp(int index)
+    {
+        if (index <= 0 || index >= Layers.Count) return;
+        (Layers[index], Layers[index - 1]) = (Layers[index - 1], Layers[index]);
+        if (SelectedLayerIndex == index) SelectedLayerIndex = index - 1;
+        else if (SelectedLayerIndex == index - 1) SelectedLayerIndex = index;
+    }
+
+    public void MoveLayerDown(int index)
+    {
+        if (index < 0 || index >= Layers.Count - 1) return;
+        (Layers[index], Layers[index + 1]) = (Layers[index + 1], Layers[index]);
+        if (SelectedLayerIndex == index) SelectedLayerIndex = index + 1;
+        else if (SelectedLayerIndex == index + 1) SelectedLayerIndex = index;
+    }
+
+    public bool HasEmissiveLayers()
+    {
+        foreach (var l in Layers)
+            if (l.IsVisible && l.AffectsEmissive && !string.IsNullOrEmpty(l.ImagePath))
+                return true;
+        return false;
+    }
+}

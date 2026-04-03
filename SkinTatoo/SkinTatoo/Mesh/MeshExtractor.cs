@@ -15,10 +15,25 @@ public class MeshExtractor
     private readonly IDataManager dataManager;
     private readonly IPluginLog log;
     private SqPack? sqPack;
+    private Lumina.GameData? luminaForDisk;
+
     public MeshExtractor(IDataManager dataManager, IPluginLog log)
     {
         this.dataManager = dataManager;
         this.log = log;
+    }
+
+    public Lumina.GameData? GetLuminaForDisk()
+    {
+        if (luminaForDisk == null)
+        {
+            var sqpackPath = dataManager.GameData.DataPath.FullName;
+            luminaForDisk = new Lumina.GameData(sqpackPath, new Lumina.LuminaOptions
+            {
+                PanicOnSheetChecksumMismatch = false,
+            });
+        }
+        return luminaForDisk;
     }
 
     public SqPack? GetSqPackInstance()
