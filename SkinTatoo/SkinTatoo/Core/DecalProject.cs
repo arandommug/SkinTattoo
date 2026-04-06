@@ -52,6 +52,7 @@ public class DecalProject
                 MtrlGamePath = g.MtrlGamePath,
                 MtrlDiskPath = g.MtrlDiskPath,
                 MeshDiskPath = g.MeshDiskPath,
+                MeshDiskPaths = new List<string>(g.MeshDiskPaths),
                 OrigDiffuseDiskPath = g.OrigDiffuseDiskPath,
                 OrigNormDiskPath = g.OrigNormDiskPath,
                 OrigMtrlDiskPath = g.OrigMtrlDiskPath,
@@ -81,10 +82,13 @@ public class DecalProject
                     GradientAngleDeg = l.GradientAngleDeg,
                     GradientScale = l.GradientScale,
                     GradientOffset = l.GradientOffset,
+                    Clip = (int)l.Clip,
                 });
             }
+            sg.SelectedLayerIndex = g.SelectedLayerIndex;
             config.TargetGroups.Add(sg);
         }
+        config.SelectedGroupIndex = SelectedGroupIndex;
         config.Save();
     }
 
@@ -103,6 +107,7 @@ public class DecalProject
                 MtrlGamePath = sg.MtrlGamePath,
                 MtrlDiskPath = sg.MtrlDiskPath,
                 MeshDiskPath = sg.MeshDiskPath,
+                MeshDiskPaths = new List<string>(sg.MeshDiskPaths),
                 OrigDiffuseDiskPath = sg.OrigDiffuseDiskPath,
                 OrigNormDiskPath = sg.OrigNormDiskPath,
                 OrigMtrlDiskPath = sg.OrigMtrlDiskPath,
@@ -129,10 +134,13 @@ public class DecalProject
                     GradientAngleDeg = s.GradientAngleDeg,
                     GradientScale = s.GradientScale,
                     GradientOffset = s.GradientOffset,
+                    Clip = (ClipMode)s.Clip,
                 });
             }
+            g.SelectedLayerIndex = sg.SelectedLayerIndex;
             Groups.Add(g);
         }
-        SelectedGroupIndex = Groups.Count > 0 ? 0 : -1;
+        SelectedGroupIndex = config.SelectedGroupIndex >= 0 && config.SelectedGroupIndex < Groups.Count
+            ? config.SelectedGroupIndex : (Groups.Count > 0 ? 0 : -1);
     }
 }

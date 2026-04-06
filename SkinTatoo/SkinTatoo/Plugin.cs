@@ -46,6 +46,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly MainWindow mainWindow;
     private readonly ConfigWindow configWindow;
     private readonly DebugWindow debugWindow;
+    private readonly ModelEditorWindow modelEditorWindow;
 
     // Auto-save throttle
     private DateTime lastAutoSave = DateTime.MinValue;
@@ -96,17 +97,24 @@ public sealed class Plugin : IDalamudPlugin
         configWindow = new ConfigWindow(config);
         debugWindow = new DebugWindow();
 
+        // 3D Editor
+        modelEditorWindow = new ModelEditorWindow(project, previewService, penumbra, pluginInterface.UiBuilder.DeviceHandle);
+
         mainWindow.DebugWindowRef = debugWindow;
+        mainWindow.ConfigWindowRef = configWindow;
+        mainWindow.ModelEditorWindowRef = modelEditorWindow;
         mainWindow.OnSaveRequested += SaveProject;
 
         windowSystem = new WindowSystem("SkinTatoo");
         windowSystem.AddWindow(mainWindow);
         windowSystem.AddWindow(configWindow);
         windowSystem.AddWindow(debugWindow);
+        windowSystem.AddWindow(modelEditorWindow);
 
         // Restore window open states
         mainWindow.IsOpen = config.MainWindowOpen;
         debugWindow.IsOpen = config.DebugWindowOpen;
+        modelEditorWindow.IsOpen = config.ModelEditorWindowOpen;
 
         // 8. UiBuilder hooks
         pluginInterface.UiBuilder.Draw += DrawUi;
@@ -151,6 +159,7 @@ public sealed class Plugin : IDalamudPlugin
     {
         config.MainWindowOpen = mainWindow.IsOpen;
         config.DebugWindowOpen = debugWindow.IsOpen;
+        config.ModelEditorWindowOpen = modelEditorWindow.IsOpen;
         config.Save();
     }
 
@@ -172,9 +181,10 @@ public sealed class Plugin : IDalamudPlugin
 
         foreach (var group in project.Groups)
         {
-            if (!string.IsNullOrEmpty(group.MeshDiskPath) && previewService.CurrentMesh == null)
+            if (group.AllMeshPaths.Count > 0 && previewService.CurrentMesh == null)
             {
-                previewService.LoadMesh(group.MeshDiskPath);
+                previewService.LoadMeshes(group.AllMeshPaths);
+                modelEditorWindow.OnMeshChanged();
                 break;
             }
         }
@@ -187,7 +197,10 @@ public sealed class Plugin : IDalamudPlugin
             { hasLayers = true; break; }
         }
         if (hasLayers && config.AutoPreview)
+        {
             previewService.UpdatePreview(project);
+            modelEditorWindow.MarkTexturesDirty();
+        }
     }
 
     public void Dispose()
@@ -206,6 +219,7 @@ public sealed class Plugin : IDalamudPlugin
         windowSystem.RemoveAllWindows();
         mainWindow.OnSaveRequested -= SaveProject;
         mainWindow.Dispose();
+        modelEditorWindow.Dispose();
 
         debugServer.Dispose();
 

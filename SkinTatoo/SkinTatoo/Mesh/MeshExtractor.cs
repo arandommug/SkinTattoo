@@ -121,10 +121,11 @@ public class MeshExtractor
         try
         {
             var mdlFile = new MdlFile(mdlBytes);
-            // Use Meddle's Model class to extract vertices properly
             var model = new MeddleModel(gamePath, mdlFile, null);
-            var meshData = ConvertMeddleModel(model);
-            DebugServer.AppendLog($"[MeshExtractor] Done: {meshData.Vertices.Length} verts, {meshData.TriangleCount} tris");
+            // Only include LOD0 main meshes, skip shadow/water/fog/crest meshes
+            int mainMeshCount = mdlFile.Lods.Length > 0 ? mdlFile.Lods[0].MeshCount : model.Meshes.Count;
+            var meshData = ConvertMeddleModel(model, mainMeshCount);
+            DebugServer.AppendLog($"[MeshExtractor] Done: {meshData.Vertices.Length} verts, {meshData.TriangleCount} tris (mainMeshCount={mainMeshCount}, totalInModel={model.Meshes.Count})");
             return meshData;
         }
         catch (Exception ex)
@@ -135,13 +136,53 @@ public class MeshExtractor
         }
     }
 
-    private static MeshData ConvertMeddleModel(MeddleModel model)
+    public MeshData? ExtractAndMerge(List<string> paths)
+    {
+        if (paths.Count == 0) return null;
+        if (paths.Count == 1) return ExtractMesh(paths[0]);
+
+        var allVertices = new List<MeshVertex>();
+        var allIndices = new List<ushort>();
+
+        foreach (var path in paths)
+        {
+            var mesh = ExtractMesh(path);
+            if (mesh == null) continue;
+
+            var baseVertex = (ushort)allVertices.Count;
+            allVertices.AddRange(mesh.Vertices);
+            foreach (var idx in mesh.Indices)
+                allIndices.Add((ushort)(idx + baseVertex));
+        }
+
+        if (allVertices.Count == 0) return null;
+
+        var merged = new MeshData
+        {
+            Vertices = allVertices.ToArray(),
+            Indices = allIndices.ToArray(),
+        };
+        DebugServer.AppendLog($"[MeshExtractor] Merged {paths.Count} models: {merged.Vertices.Length} verts, {merged.TriangleCount} tris");
+        return merged;
+    }
+
+    private static MeshData ConvertMeddleModel(MeddleModel model, int maxMeshes = int.MaxValue)
     {
         var allVertices = new List<MeshVertex>();
         var allIndices = new List<ushort>();
 
-        foreach (var mesh in model.Meshes)
+        // Only load mesh groups that use the primary material (matIdx=0) — the skin material.
+        // Other material indices are typically accessories/overlays (nipple covers, underwear, etc.)
+        var meshCount = Math.Min(model.Meshes.Count, maxMeshes);
+        for (int mi = 0; mi < meshCount; mi++)
         {
+            var mesh = model.Meshes[mi];
+            DebugServer.AppendLog($"[MeshExtractor]   mesh[{mi}]: matIdx={mesh.MaterialIdx} verts={mesh.Vertices.Count} indices={mesh.Indices.Count} submeshes={mesh.SubMeshes.Count}");
+            if (mesh.MaterialIdx != 0)
+            {
+                DebugServer.AppendLog($"[MeshExtractor]   → skipped (non-primary material)");
+                continue;
+            }
             var baseVertex = (ushort)allVertices.Count;
 
             foreach (var v in mesh.Vertices)
@@ -149,8 +190,8 @@ public class MeshExtractor
                 var pos = v.Position ?? Vector3.Zero;
                 var normal = (v.Normals != null && v.Normals.Length > 0) ? v.Normals[0] : Vector3.UnitY;
                 var rawUv = (v.TexCoords != null && v.TexCoords.Length > 0) ? v.TexCoords[0] : Vector2.Zero;
-                // FFXIV UV V is flipped (negative range), normalize to [0,1]
-                var uv = new Vector2(rawUv.X, -rawUv.Y);
+                // FFXIV UV V is negative (0 to -1). Convert to compositor convention directly.
+                var uv = new Vector2(rawUv.X, 1.0f + rawUv.Y);
 
                 allVertices.Add(new MeshVertex
                 {

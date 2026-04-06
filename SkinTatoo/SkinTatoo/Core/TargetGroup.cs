@@ -14,6 +14,34 @@ public class TargetGroup
     public string? MtrlGamePath { get; set; }
     public string? MtrlDiskPath { get; set; }
     public string? MeshDiskPath { get; set; }
+    public List<string> MeshDiskPaths { get; set; } = [];
+    public HashSet<string> HiddenMeshPaths { get; set; } = [];
+
+    public List<string> AllMeshPaths
+    {
+        get
+        {
+            var paths = new List<string>();
+            if (!string.IsNullOrEmpty(MeshDiskPath))
+                paths.Add(MeshDiskPath);
+            foreach (var p in MeshDiskPaths)
+                if (!string.IsNullOrEmpty(p) && !paths.Contains(p))
+                    paths.Add(p);
+            return paths;
+        }
+    }
+
+    public List<string> VisibleMeshPaths
+    {
+        get
+        {
+            var paths = new List<string>();
+            foreach (var p in AllMeshPaths)
+                if (!HiddenMeshPaths.Contains(p))
+                    paths.Add(p);
+            return paths;
+        }
+    }
 
     // Original paths before Penumbra redirect
     public string? OrigDiffuseDiskPath { get; set; }

@@ -31,6 +31,7 @@ public class SavedLayer
     public float GradientAngleDeg { get; set; }
     public float GradientScale { get; set; } = 1f;
     public float GradientOffset { get; set; }
+    public int Clip { get; set; }
 }
 
 [Serializable]
@@ -44,6 +45,8 @@ public class SavedTargetGroup
     public string? MtrlGamePath { get; set; }
     public string? MtrlDiskPath { get; set; }
     public string? MeshDiskPath { get; set; }
+    public List<string> MeshDiskPaths { get; set; } = [];
+    public int SelectedLayerIndex { get; set; } = -1;
     public string? OrigDiffuseDiskPath { get; set; }
     public string? OrigNormDiskPath { get; set; }
     public string? OrigMtrlDiskPath { get; set; }
@@ -58,9 +61,11 @@ public class Configuration : IPluginConfiguration
     public int TextureResolution { get; set; } = 1024;
 
     public List<SavedTargetGroup> TargetGroups { get; set; } = [];
+    public int SelectedGroupIndex { get; set; } = -1;
 
     public bool MainWindowOpen { get; set; }
     public bool DebugWindowOpen { get; set; }
+    public bool ModelEditorWindowOpen { get; set; }
     public string? LastImageDir { get; set; }
     public bool AutoPreview { get; set; }
     public bool UseGpuSwap { get; set; } = true;

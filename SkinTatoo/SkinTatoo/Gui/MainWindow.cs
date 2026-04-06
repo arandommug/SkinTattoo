@@ -47,8 +47,16 @@ public class MainWindow : Window, IDisposable
     private bool canvasScalingLayer;
     private bool showHelpWindow;
 
-    // Highlight glow state
+    // Panel widths (resizable)
+    private float leftPanelWidth = -1;
+    private float rightPanelWidth = 260f;
+    private bool draggingLeftSplitter;
+    private bool draggingRightSplitter;
+
+    // Highlight glow state (toggle mode)
     private bool highlightActive;
+    private int highlightGroupIndex = -1;
+    private int highlightLayerIndex = -1;
     private int highlightFrameCounter;
     private const int HighlightCycleSteps = 400;
 
@@ -59,11 +67,14 @@ public class MainWindow : Window, IDisposable
     private const double PreviewDebounceFullSec = 0.5;
     private const double PreviewMaxWaitFullSec = 1.5;
 
-    private static readonly string[] BlendModeNames = ["正常", "正片叠底", "叠加", "柔光"];
-    private static readonly BlendMode[] BlendModeValues = [BlendMode.Normal, BlendMode.Multiply, BlendMode.Overlay, BlendMode.SoftLight];
+    private static readonly string[] BlendModeNames = ["正常", "正片叠底", "滤色", "叠加", "柔光", "强光", "变暗", "变亮", "颜色减淡", "颜色加深", "差值", "排除"];
+    private static readonly BlendMode[] BlendModeValues = [BlendMode.Normal, BlendMode.Multiply, BlendMode.Screen, BlendMode.Overlay, BlendMode.SoftLight, BlendMode.HardLight, BlendMode.Darken, BlendMode.Lighten, BlendMode.ColorDodge, BlendMode.ColorBurn, BlendMode.Difference, BlendMode.Exclusion];
     private static readonly string[] EmissiveMaskNames = ["均匀", "中心扩散", "边缘光环", "边缘描边", "方向渐变", "高斯羽化", "形状描边"];
+    private static readonly string[] ClipModeNames = ["无裁剪", "切左半", "切右半", "切上半", "切下半"];
 
     public DebugWindow? DebugWindowRef { get; set; }
+    public ConfigWindow? ConfigWindowRef { get; set; }
+    public ModelEditorWindow? ModelEditorWindowRef { get; set; }
     public event Action? OnSaveRequested;
 
     public MainWindow(
@@ -93,6 +104,16 @@ public class MainWindow : Window, IDisposable
         // Apply any completed async GPU swaps (non-blocking)
         previewService.ApplyPendingSwaps();
 
+        // Check if 3D editor triggered a change
+        if (previewService.ExternalDirty)
+        {
+            previewService.ExternalDirty = false;
+            MarkPreviewDirty();
+        }
+
+        // Highlight: push cycling color every frame while active
+        UpdateHighlight();
+
         DrawToolbar();
         ImGui.Separator();
 
@@ -107,6 +128,50 @@ public class MainWindow : Window, IDisposable
 
         if (showHelpWindow)
             DrawHelpWindow();
+    }
+
+    private void UpdateHighlight()
+    {
+        if (!highlightActive) return;
+        if (highlightGroupIndex < 0 || highlightGroupIndex >= project.Groups.Count)
+        { highlightActive = false; return; }
+
+        var group = project.Groups[highlightGroupIndex];
+        if (highlightLayerIndex < 0 || highlightLayerIndex >= group.Layers.Count)
+        { highlightActive = false; return; }
+
+        highlightFrameCounter++;
+        var t = highlightFrameCounter;
+        var hue = (t % HighlightCycleSteps) / (float)HighlightCycleSteps;
+        var intensity = 1.0f + 1.0f * MathF.Sin(t * 0.03f);
+        var color = TextureSwapService.HsvToRgb(hue, 1f, 1f) * intensity;
+        HighlightEmissive(color, group);
+    }
+
+    private unsafe void HighlightEmissive(Vector3 color, TargetGroup? targetGroup = null)
+    {
+        var group = targetGroup ?? project.SelectedGroup;
+        if (group == null || string.IsNullOrEmpty(group.MtrlGamePath)) return;
+
+        var charBase = previewService.GetCharacterBase();
+        if (charBase == null) return;
+
+        previewService.HighlightEmissiveColor(charBase, group, color);
+    }
+
+    private unsafe void RestoreEmissiveAfterHighlight(TargetGroup group)
+    {
+        if (!group.HasEmissiveLayers())
+        {
+            // No emissive layers — write black to clear the highlight glow
+            var charBase = previewService.GetCharacterBase();
+            if (charBase != null)
+                previewService.HighlightEmissiveColor(charBase, group, Vector3.Zero);
+            return;
+        }
+
+        // Has emissive layers — restore the real emissive color via normal preview path
+        TryDirectEmissiveUpdate(group, group.Layers.Find(l => l.IsVisible && l.AffectsEmissive)!);
     }
 
     private void DrawHelpWindow()
@@ -161,6 +226,14 @@ public class MainWindow : Window, IDisposable
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("调试窗口");
 
         ImGui.SameLine();
+        if (ImGuiComponents.IconButton(10, FontAwesomeIcon.Cube))
+        {
+            if (ModelEditorWindowRef != null)
+                ModelEditorWindowRef.IsOpen = !ModelEditorWindowRef.IsOpen;
+        }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("3D 贴花编辑器");
+
+        ImGui.SameLine();
         using (ImRaii.Disabled(project.SelectedLayer == null))
         {
             if (ImGuiComponents.IconButton(2, FontAwesomeIcon.Undo))
@@ -187,12 +260,17 @@ public class MainWindow : Window, IDisposable
         ImGui.SameLine();
 
         var group = project.SelectedGroup;
-        if (group != null && !string.IsNullOrEmpty(group.MeshDiskPath))
+        if (group != null && group.AllMeshPaths.Count > 0)
         {
             var meshIcon = previewService.CurrentMesh == null ? FontAwesomeIcon.Cube : FontAwesomeIcon.SyncAlt;
             if (ImGuiComponents.IconButton(4, meshIcon))
-                previewService.LoadMesh(group.MeshDiskPath);
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip(previewService.CurrentMesh == null ? "加载模型" : "重新加载模型");
+            {
+                previewService.LoadMeshes(group.AllMeshPaths);
+                ModelEditorWindowRef?.OnMeshChanged();
+            }
+            var meshCount = group.AllMeshPaths.Count;
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip(previewService.CurrentMesh == null
+                ? $"加载模型 ({meshCount} 个)" : $"重新加载模型 ({meshCount} 个)");
             ImGui.SameLine();
         }
 
@@ -204,25 +282,60 @@ public class MainWindow : Window, IDisposable
         }
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("参数变化时自动更新游戏内预览");
 
-        ImGui.SameLine();
-        ImGui.Spacing();
-        ImGui.SameLine();
+        if (!config.AutoPreview)
+        {
+            ImGui.SameLine();
+            var hasTarget = project.SelectedGroup != null && !string.IsNullOrEmpty(project.SelectedGroup.DiffuseGamePath);
+            using (ImRaii.Disabled(!hasTarget))
+            {
+                if (ImGuiComponents.IconButton(5, FontAwesomeIcon.SyncAlt))
+                    TriggerPreview();
+            }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("更新预览");
+        }
+
+        // Right-aligned: Penumbra status + settings gear (gear at far right)
+        var penText = penumbra.IsAvailable ? "● Penumbra" : "Penumbra [x]";
+        var penTextWidth = ImGui.CalcTextSize(penText).X;
+        var gearWidth = ImGui.GetFrameHeight();
+        var spacing = ImGui.GetStyle().ItemSpacing.X;
+        var rightEdge = ImGui.GetContentRegionMax().X;
+        var rightStartX = rightEdge - penTextWidth - gearWidth - spacing * 2;
+
+        ImGui.SameLine(rightStartX);
         var penColor = penumbra.IsAvailable ? new Vector4(0, 1, 0.3f, 1) : new Vector4(1, 0.8f, 0, 1);
-        ImGui.TextColored(penColor, penumbra.IsAvailable ? "● Penumbra" : "Penumbra [x]");
+        ImGui.TextColored(penColor, penText);
+
+        ImGui.SameLine();
+        if (ImGuiComponents.IconButton(6, FontAwesomeIcon.Cog))
+        {
+            if (ConfigWindowRef != null)
+                ConfigWindowRef.IsOpen = !ConfigWindowRef.IsOpen;
+        }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("插件设置");
     }
 
     private void DrawThreePanelLayout(float totalWidth, float height)
     {
-        var leftWidth = totalWidth * 0.20f;
-        var rightWidth = 260f;
-        var centerWidth = totalWidth - leftWidth - rightWidth - ImGui.GetStyle().ItemSpacing.X * 2;
+        const float splitterWidth = 6f;
+        const float minPanelWidth = 120f;
 
-        using (var left = ImRaii.Child("##LeftPanel", new Vector2(leftWidth, height), true))
+        if (leftPanelWidth < 0) leftPanelWidth = totalWidth * 0.20f;
+        leftPanelWidth = Math.Clamp(leftPanelWidth, minPanelWidth, totalWidth - rightPanelWidth - minPanelWidth - splitterWidth * 2);
+        rightPanelWidth = Math.Clamp(rightPanelWidth, minPanelWidth, totalWidth - leftPanelWidth - minPanelWidth - splitterWidth * 2);
+        var centerWidth = totalWidth - leftPanelWidth - rightPanelWidth - splitterWidth * 2;
+
+        // Left panel
+        using (var left = ImRaii.Child("##LeftPanel", new Vector2(leftPanelWidth, height), true))
         {
             if (left.Success) DrawLayerPanel();
         }
 
-        ImGui.SameLine();
+        // Left splitter
+        ImGui.SameLine(0, 0);
+        DrawVerticalSplitter("##SplitL", splitterWidth, height, ref leftPanelWidth, ref draggingLeftSplitter, minPanelWidth, totalWidth - rightPanelWidth - minPanelWidth - splitterWidth * 2);
+
+        ImGui.SameLine(0, 0);
 
         using (var center = ImRaii.Child("##CenterPanel", new Vector2(centerWidth, height), true,
             ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse))
@@ -230,15 +343,54 @@ public class MainWindow : Window, IDisposable
             if (center.Success) DrawCanvas();
         }
 
-        ImGui.SameLine();
+        // Right splitter
+        ImGui.SameLine(0, 0);
+        // Invert: dragging right increases rightPanelWidth
+        var invertedRight = rightPanelWidth;
+        DrawVerticalSplitter("##SplitR", splitterWidth, height, ref invertedRight, ref draggingRightSplitter, minPanelWidth, totalWidth - leftPanelWidth - minPanelWidth - splitterWidth * 2, true);
+        rightPanelWidth = invertedRight;
 
-        using (var right = ImRaii.Child("##RightPanel", new Vector2(rightWidth, height), true))
+        ImGui.SameLine(0, 0);
+
+        using (var right = ImRaii.Child("##RightPanel", new Vector2(rightPanelWidth, height), true))
         {
             if (right.Success) DrawParameterPanel();
         }
     }
 
-    // ── Left Panel: Tree structure ───────────────────────────────────────────
+    private void DrawVerticalSplitter(string id, float width, float height,
+        ref float panelWidth, ref bool dragging, float min, float max, bool invert = false)
+    {
+        var cursorPos = ImGui.GetCursorScreenPos();
+        ImGui.InvisibleButton(id, new Vector2(width, height));
+        var hovered = ImGui.IsItemHovered();
+        var active = ImGui.IsItemActive();
+
+        if (hovered || dragging)
+            ImGui.SetMouseCursor(ImGuiMouseCursor.ResizeAll);
+
+        // Draw splitter line
+        var drawList = ImGui.GetWindowDrawList();
+        var lineColor = (hovered || active)
+            ? ImGui.GetColorU32(new Vector4(0.5f, 0.7f, 1f, 0.8f))
+            : ImGui.GetColorU32(new Vector4(0.3f, 0.3f, 0.35f, 0.6f));
+        var lineX = cursorPos.X + width * 0.5f;
+        drawList.AddLine(new Vector2(lineX, cursorPos.Y), new Vector2(lineX, cursorPos.Y + height), lineColor, 2f);
+
+        if (active)
+        {
+            dragging = true;
+            var delta = ImGui.GetIO().MouseDelta.X;
+            if (invert) delta = -delta;
+            panelWidth = Math.Clamp(panelWidth + delta, min, max);
+        }
+        else
+        {
+            dragging = false;
+        }
+    }
+
+    // ── Left Panel: Card-based layer list ──────────────────────────────────
 
     private void DrawLayerPanel()
     {
@@ -257,7 +409,10 @@ public class MainWindow : Window, IDisposable
         {
             if (ImGuiComponents.IconButton(11, FontAwesomeIcon.Trash))
             {
-                project.RemoveGroup(project.SelectedGroupIndex);
+                var gi2 = project.SelectedGroupIndex;
+                if (gi2 >= 0 && gi2 < project.Groups.Count && project.Groups[gi2].HasEmissiveLayers())
+                    previewService.ResetSwapState();
+                project.RemoveGroup(gi2);
                 MarkPreviewDirty();
             }
         }
@@ -269,39 +424,65 @@ public class MainWindow : Window, IDisposable
 
         ImGui.Separator();
 
-        using var listChild = ImRaii.Child("##GroupTree", new Vector2(-1, -1), false);
+        using var listChild = ImRaii.Child("##GroupList", new Vector2(-1, -1), false);
         if (!listChild.Success) return;
 
         for (var gi = 0; gi < project.Groups.Count; gi++)
         {
             ImGui.PushID(gi);
-            DrawGroupNode(gi);
+            DrawGroupCard(gi);
             ImGui.PopID();
+            ImGui.Spacing();
         }
 
         if (project.Groups.Count == 0)
             ImGui.TextDisabled("点击 + 添加投影目标");
     }
 
-    private void DrawGroupNode(int gi)
+    private void DrawGroupCard(int gi)
     {
         var group = project.Groups[gi];
         var isGroupSelected = project.SelectedGroupIndex == gi;
+        var drawList = ImGui.GetWindowDrawList();
+        var availWidth = ImGui.GetContentRegionAvail().X;
 
-        var flags = ImGuiTreeNodeFlags.OpenOnArrow | ImGuiTreeNodeFlags.SpanAvailWidth;
-        if (isGroupSelected && group.SelectedLayerIndex < 0) flags |= ImGuiTreeNodeFlags.Selected;
-        if (group.IsExpanded) flags |= ImGuiTreeNodeFlags.DefaultOpen;
+        // ── Card header ──
+        var headerStart = ImGui.GetCursorScreenPos();
+        var headerHeight = ImGui.GetFrameHeight() + 4;
+        var headerEnd = headerStart + new Vector2(availWidth, headerHeight);
 
-        var open = ImGui.TreeNodeEx($"{group.Name}##grp", flags);
-        group.IsExpanded = open;
+        var headerColor = isGroupSelected && group.SelectedLayerIndex < 0
+            ? ImGui.GetColorU32(new Vector4(0.20f, 0.35f, 0.55f, 1f))
+            : ImGui.GetColorU32(new Vector4(0.18f, 0.18f, 0.22f, 1f));
 
-        if (ImGui.IsItemClicked(ImGuiMouseButton.Left) && !ImGui.IsItemToggledOpen())
+        if (group.IsExpanded)
+            drawList.AddRectFilled(headerStart, headerEnd, headerColor, 4f, ImDrawFlags.RoundCornersTop);
+        else
+            drawList.AddRectFilled(headerStart, headerEnd, headerColor, 4f);
+
+        // Collapse arrow
+        ImGui.SetCursorScreenPos(headerStart + new Vector2(4, 2));
+        var arrowIcon = group.IsExpanded ? FontAwesomeIcon.ChevronDown : FontAwesomeIcon.ChevronRight;
+        ImGui.PushStyleColor(ImGuiCol.Button, 0);
+        ImGui.PushStyleColor(ImGuiCol.ButtonHovered, ImGui.GetColorU32(new Vector4(1, 1, 1, 0.1f)));
+        ImGui.PushStyleColor(ImGuiCol.ButtonActive, 0);
+        if (ImGuiComponents.IconButton(50, arrowIcon))
+            group.IsExpanded = !group.IsExpanded;
+        ImGui.PopStyleColor(3);
+
+        // Group name
+        ImGui.SameLine();
+        ImGui.SetCursorPosY(ImGui.GetCursorPosY() + 2);
+        var nameWidth = availWidth - (ImGui.GetCursorScreenPos().X - headerStart.X) - 8;
+        if (nameWidth < 20) nameWidth = 20;
+        if (ImGui.Selectable($"{group.Name}##grpHdr", false, ImGuiSelectableFlags.None,
+            new Vector2(nameWidth, ImGui.GetTextLineHeight())))
         {
             project.SelectedGroupIndex = gi;
             group.SelectedLayerIndex = -1;
         }
 
-        // Tooltip with target info
+        // Tooltip
         if (ImGui.IsItemHovered())
         {
             ImGui.BeginTooltip();
@@ -314,9 +495,21 @@ public class MainWindow : Window, IDisposable
             ImGui.EndTooltip();
         }
 
-        if (!open) return;
+        // Ensure cursor is past header
+        ImGui.SetCursorScreenPos(new Vector2(headerStart.X, headerEnd.Y));
 
-        // Layer buttons within group
+        if (!group.IsExpanded) return;
+
+        // ── Card body ──
+        var bodyStart = ImGui.GetCursorScreenPos();
+
+        // Use channels: ch0 = background, ch1 = content (drawn on top)
+        drawList.ChannelsSplit(2);
+        drawList.ChannelsSetCurrent(1);
+
+        ImGui.Indent(6);
+
+        // Layer toolbar
         if (ImGuiComponents.IconButton(20, FontAwesomeIcon.Plus))
         {
             project.SelectedGroupIndex = gi;
@@ -332,7 +525,13 @@ public class MainWindow : Window, IDisposable
         using (ImRaii.Disabled(!canDeleteLayer))
         {
             if (ImGuiComponents.IconButton(21, FontAwesomeIcon.Trash))
-                group.RemoveLayer(group.SelectedLayerIndex);
+            {
+                var idx = group.SelectedLayerIndex;
+                if (idx >= 0 && idx < group.Layers.Count && group.Layers[idx].AffectsEmissive)
+                    previewService.ResetSwapState();
+                group.RemoveLayer(idx);
+                MarkPreviewDirty();
+            }
         }
         if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
             ImGui.SetTooltip("按住 Ctrl+Shift 删除图层");
@@ -360,49 +559,75 @@ public class MainWindow : Window, IDisposable
         ImGui.SameLine();
         ImGui.TextDisabled($"({group.Layers.Count})");
 
-        // Layer list
+        // Layer rows
         for (var li = 0; li < group.Layers.Count; li++)
         {
             var layer = group.Layers[li];
             ImGui.PushID(li + 1000);
 
+            var isLayerSelected = isGroupSelected && group.SelectedLayerIndex == li;
+
+            // Selected row highlight (on content channel, so it's behind text but above body bg)
+            if (isLayerSelected)
+            {
+                var rowPos = ImGui.GetCursorScreenPos();
+                drawList.AddRectFilled(
+                    rowPos - new Vector2(2, 1),
+                    rowPos + new Vector2(availWidth - 10, ImGui.GetFrameHeight() + 1),
+                    ImGui.GetColorU32(new Vector4(0.24f, 0.42f, 0.65f, 0.5f)), 3f);
+            }
+
+            // Visibility toggle
             var visIcon = layer.IsVisible ? FontAwesomeIcon.Eye : FontAwesomeIcon.EyeSlash;
             var visColor = layer.IsVisible ? new Vector4(1, 1, 1, 1) : new Vector4(0.5f, 0.5f, 0.5f, 1);
             ImGui.PushStyleColor(ImGuiCol.Text, visColor);
             if (ImGuiComponents.IconButton(100 + li, visIcon))
             {
                 layer.IsVisible = !layer.IsVisible;
-                if (!layer.IsVisible && layer.AffectsEmissive) previewService.ClearEmissiveHookTargets();
+                if (layer.AffectsEmissive) previewService.ResetSwapState();
                 MarkPreviewDirty();
             }
             ImGui.PopStyleColor();
 
-            var layerGroup = gi < project.Groups.Count ? project.Groups[gi] : null;
-            if (layer.AffectsEmissive && layerGroup != null
-                && !string.IsNullOrEmpty(layerGroup.MtrlGamePath))
+            // Highlight button — hover to activate, crosshair icon
+            if (!string.IsNullOrEmpty(layer.ImagePath) && !string.IsNullOrEmpty(group.MtrlGamePath))
             {
                 ImGui.SameLine();
-                ImGuiComponents.IconButton(200 + li, FontAwesomeIcon.Lightbulb);
+                var isThisHighlighted = highlightActive && highlightGroupIndex == gi && highlightLayerIndex == li;
+                if (isThisHighlighted)
+                {
+                    var iconHue = (highlightFrameCounter % HighlightCycleSteps) / (float)HighlightCycleSteps;
+                    var ic = TextureSwapService.HsvToRgb(iconHue, 0.8f, 1f);
+                    ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(ic.X, ic.Y, ic.Z, 1f));
+                }
+                ImGuiComponents.IconButton(200 + li, FontAwesomeIcon.Crosshairs);
+                if (isThisHighlighted) ImGui.PopStyleColor();
                 if (ImGui.IsItemHovered())
                 {
-                    ImGui.SetTooltip("高亮显示此贴花的发光区域");
+                    ImGui.SetTooltip("高亮显示贴花");
+                    if (!highlightActive || highlightGroupIndex != gi || highlightLayerIndex != li)
+                    {
+                        if (!previewService.HasEmissiveOffset(group.MtrlGamePath))
+                            previewService.EnsureEmissiveInitialized(group);
+                        highlightFrameCounter = 0;
+                    }
                     highlightActive = true;
-                    highlightFrameCounter++;
-                    var hue = (highlightFrameCounter % HighlightCycleSteps) / (float)HighlightCycleSteps;
-                    var rainbowColor = TextureSwapService.HsvToRgb(hue, 1f, 1f);
-                    HighlightEmissive(rainbowColor);
+                    highlightGroupIndex = gi;
+                    highlightLayerIndex = li;
                 }
-                else if (highlightActive)
+                else if (isThisHighlighted)
                 {
                     highlightActive = false;
+                    highlightGroupIndex = -1;
+                    highlightLayerIndex = -1;
                     highlightFrameCounter = 0;
-                    MarkPreviewDirty();
+                    // Restore original emissive color without full redraw
+                    RestoreEmissiveAfterHighlight(group);
                 }
             }
 
             ImGui.SameLine();
 
-            var isLayerSelected = isGroupSelected && group.SelectedLayerIndex == li;
             if (ImGui.Selectable(layer.Name, isLayerSelected))
             {
                 project.SelectedGroupIndex = gi;
@@ -413,7 +638,22 @@ public class MainWindow : Window, IDisposable
             ImGui.PopID();
         }
 
-        ImGui.TreePop();
+        ImGui.Unindent(6);
+        ImGui.Spacing();
+
+        // Draw body background on channel 0 (behind content)
+        var bodyEnd = ImGui.GetCursorScreenPos();
+        drawList.ChannelsSetCurrent(0);
+        drawList.AddRectFilled(
+            bodyStart,
+            new Vector2(headerStart.X + availWidth, bodyEnd.Y),
+            ImGui.GetColorU32(new Vector4(0.12f, 0.12f, 0.15f, 1f)), 4f, ImDrawFlags.RoundCornersBottom);
+        // Card outline
+        drawList.AddRect(
+            headerStart,
+            new Vector2(headerStart.X + availWidth, bodyEnd.Y),
+            ImGui.GetColorU32(new Vector4(0.28f, 0.28f, 0.32f, 1f)), 4f);
+        drawList.ChannelsMerge();
     }
 
     // ── Center Panel: Interactive UV Canvas ──────────────────────────────────
@@ -564,6 +804,27 @@ public class MainWindow : Window, IDisposable
             var pCenter = uvOrigin + center * fitSize;
             var pHalfSize = scale * fitSize * 0.5f;
 
+            // Apply clip to local-space half extents and UV coords
+            var localMin = -pHalfSize;
+            var localMax = pHalfSize;
+            var uvMin = Vector2.Zero;
+            var uvMax = Vector2.One;
+            switch (layer.Clip)
+            {
+                case ClipMode.ClipLeft:
+                    localMin.X = 0; uvMin.X = 0.5f;
+                    break;
+                case ClipMode.ClipRight:
+                    localMax.X = 0; uvMax.X = 0.5f;
+                    break;
+                case ClipMode.ClipTop:
+                    localMin.Y = 0; uvMin.Y = 0.5f;
+                    break;
+                case ClipMode.ClipBottom:
+                    localMax.Y = 0; uvMax.Y = 0.5f;
+                    break;
+            }
+
             try
             {
                 if (File.Exists(layer.ImagePath))
@@ -571,14 +832,13 @@ public class MainWindow : Window, IDisposable
                     var wrap = textureProvider.GetFromFile(layer.ImagePath).GetWrapOrDefault();
                     if (wrap != null)
                     {
-                        var pMin = pCenter - pHalfSize;
-                        var pMax = pCenter + pHalfSize;
+                        var alpha = (uint)(layer.Opacity * 255) << 24 | 0x00FFFFFF;
 
                         if (MathF.Abs(layer.RotationDeg) < 0.1f)
                         {
-                            var alpha = (uint)(layer.Opacity * 255) << 24 | 0x00FFFFFF;
-                            drawList.AddImage(wrap.Handle, pMin, pMax,
-                                Vector2.Zero, Vector2.One, alpha);
+                            drawList.AddImage(wrap.Handle,
+                                pCenter + localMin, pCenter + localMax,
+                                uvMin, uvMax, alpha);
                         }
                         else
                         {
@@ -589,16 +849,15 @@ public class MainWindow : Window, IDisposable
                                 p.X * cos - p.Y * sin,
                                 p.X * sin + p.Y * cos);
 
-                            var tl = pCenter + Rotate(-pHalfSize);
-                            var tr = pCenter + Rotate(new Vector2(pHalfSize.X, -pHalfSize.Y));
-                            var br = pCenter + Rotate(pHalfSize);
-                            var bl = pCenter + Rotate(new Vector2(-pHalfSize.X, pHalfSize.Y));
+                            var tl = pCenter + Rotate(new Vector2(localMin.X, localMin.Y));
+                            var tr = pCenter + Rotate(new Vector2(localMax.X, localMin.Y));
+                            var br = pCenter + Rotate(new Vector2(localMax.X, localMax.Y));
+                            var bl = pCenter + Rotate(new Vector2(localMin.X, localMax.Y));
 
-                            var alpha = (uint)(layer.Opacity * 255) << 24 | 0x00FFFFFF;
                             drawList.AddImageQuad(wrap.Handle,
                                 tl, tr, br, bl,
-                                new Vector2(0, 0), new Vector2(1, 0),
-                                new Vector2(1, 1), new Vector2(0, 1),
+                                new Vector2(uvMin.X, uvMin.Y), new Vector2(uvMax.X, uvMin.Y),
+                                new Vector2(uvMax.X, uvMax.Y), new Vector2(uvMin.X, uvMax.Y),
                                 alpha);
                         }
                     }
@@ -614,7 +873,7 @@ public class MainWindow : Window, IDisposable
 
             if (MathF.Abs(layer.RotationDeg) < 0.1f)
             {
-                drawList.AddRect(pCenter - pHalfSize, pCenter + pHalfSize, borderColor, 0, ImDrawFlags.None, thickness);
+                drawList.AddRect(pCenter + localMin, pCenter + localMax, borderColor, 0, ImDrawFlags.None, thickness);
             }
             else
             {
@@ -625,10 +884,10 @@ public class MainWindow : Window, IDisposable
                     p.X * cos - p.Y * sin,
                     p.X * sin + p.Y * cos);
 
-                var tl = pCenter + Rotate(-pHalfSize);
-                var tr = pCenter + Rotate(new Vector2(pHalfSize.X, -pHalfSize.Y));
-                var br = pCenter + Rotate(pHalfSize);
-                var bl = pCenter + Rotate(new Vector2(-pHalfSize.X, pHalfSize.Y));
+                var tl = pCenter + Rotate(new Vector2(localMin.X, localMin.Y));
+                var tr = pCenter + Rotate(new Vector2(localMax.X, localMin.Y));
+                var br = pCenter + Rotate(new Vector2(localMax.X, localMax.Y));
+                var bl = pCenter + Rotate(new Vector2(localMin.X, localMax.Y));
 
                 drawList.AddQuad(tl, tr, br, bl, borderColor, thickness);
             }
@@ -764,25 +1023,42 @@ public class MainWindow : Window, IDisposable
 
         var mouseUv = (mousePos - uvOrigin) / fitSize;
         var drawList = ImGui.GetWindowDrawList();
+        var bgColor = ImGui.GetColorU32(new Vector4(0f, 0f, 0f, 0.6f));
+        var textColor = ImGui.GetColorU32(new Vector4(1f, 1f, 1f, 0.9f));
+        var dimColor = ImGui.GetColorU32(new Vector4(0.7f, 0.7f, 0.7f, 0.7f));
 
-        // UV coordinates — bottom left
+        // Bottom-left: mouse UV
         if (mouseUv.X >= 0 && mouseUv.X <= 1 && mouseUv.Y >= 0 && mouseUv.Y <= 1)
         {
             var uvText = $"UV: {mouseUv.X:F3}, {mouseUv.Y:F3}";
-            var textPos = canvasPos + new Vector2(4, canvasSize.Y - 18);
-            drawList.AddRectFilled(textPos - new Vector2(2, 1), textPos + new Vector2(ImGui.CalcTextSize(uvText).X + 4, 16),
-                ImGui.GetColorU32(new Vector4(0f, 0f, 0f, 0.7f)));
-            drawList.AddText(textPos, ImGui.GetColorU32(new Vector4(1f, 1f, 1f, 0.95f)), uvText);
+            var textPos = canvasPos + new Vector2(4, canvasSize.Y - 20);
+            var textSize = ImGui.CalcTextSize(uvText);
+            drawList.AddRectFilled(textPos - new Vector2(2, 1), textPos + new Vector2(textSize.X + 4, 17), bgColor);
+            drawList.AddText(textPos, textColor, uvText);
         }
 
-        // Modifier hints — always visible, bottom right
+        // Bottom-right: operation hints (stacked lines)
         {
-            var hints = "Shift:锁X  Ctrl:锁Y  Alt:旋转";
-            var hintsSize = ImGui.CalcTextSize(hints);
-            var hintPos = canvasPos + new Vector2(canvasSize.X - hintsSize.X - 6, canvasSize.Y - 18);
-            drawList.AddRectFilled(hintPos - new Vector2(2, 1), hintPos + new Vector2(hintsSize.X + 4, 16),
-                ImGui.GetColorU32(new Vector4(0f, 0f, 0f, 0.5f)));
-            drawList.AddText(hintPos, ImGui.GetColorU32(new Vector4(0.7f, 0.7f, 0.7f, 0.8f)), hints);
+            var hint1 = "左键:移动贴花  右键:缩放贴花  中键:平移画布  滚轮:缩放画布";
+            var hint2 = "Shift:锁定X移动  Ctrl:锁定Y移动  Alt:右键变旋转";
+            var hint1Size = ImGui.CalcTextSize(hint1);
+            var hint2Size = ImGui.CalcTextSize(hint2);
+            var pos2 = canvasPos + new Vector2(canvasSize.X - hint2Size.X - 6, canvasSize.Y - 20);
+            var pos1 = canvasPos + new Vector2(canvasSize.X - hint1Size.X - 6, canvasSize.Y - 38);
+            drawList.AddRectFilled(pos1 - new Vector2(2, 1), pos1 + new Vector2(hint1Size.X + 4, 17), bgColor);
+            drawList.AddText(pos1, dimColor, hint1);
+            drawList.AddRectFilled(pos2 - new Vector2(2, 1), pos2 + new Vector2(hint2Size.X + 4, 17), bgColor);
+            drawList.AddText(pos2, dimColor, hint2);
+        }
+
+        // Top-left: group name
+        if (group != null)
+        {
+            var groupText = group.Name;
+            var groupPos = canvasPos + new Vector2(4, 4);
+            var groupSize = ImGui.CalcTextSize(groupText);
+            drawList.AddRectFilled(groupPos - new Vector2(2, 1), groupPos + new Vector2(groupSize.X + 4, 17), bgColor);
+            drawList.AddText(groupPos, textColor, groupText);
         }
     }
 
@@ -859,28 +1135,28 @@ public class MainWindow : Window, IDisposable
         {
             if (ImGui.CollapsingHeader("UV 位置", ImGuiTreeNodeFlags.DefaultOpen))
             {
+                var labelW = 56f;
                 var cx = layer.UvCenter.X;
                 var cy = layer.UvCenter.Y;
+                ImGui.AlignTextToFramePadding(); ImGui.Text("中心 X"); ImGui.SameLine(labelW);
                 ImGui.SetNextItemWidth(-1);
-                if (ImGui.DragFloat("##centerX", ref cx, 0.005f, 0f, 1f, "X %.3f"))
+                if (ImGui.DragFloat("##centerX", ref cx, 0.005f, 0f, 1f, "%.3f"))
                 { layer.UvCenter = new Vector2(cx, cy); MarkPreviewDirty(); }
                 if (ScrollAdjust(ref cx, 0.001f, 0f, 1f))
                 { layer.UvCenter = new Vector2(cx, cy); MarkPreviewDirty(); }
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("中心点 X");
+                ImGui.AlignTextToFramePadding(); ImGui.Text("中心 Y"); ImGui.SameLine(labelW);
                 ImGui.SetNextItemWidth(-1);
-                if (ImGui.DragFloat("##centerY", ref cy, 0.005f, 0f, 1f, "Y %.3f"))
+                if (ImGui.DragFloat("##centerY", ref cy, 0.005f, 0f, 1f, "%.3f"))
                 { layer.UvCenter = new Vector2(cx, cy); MarkPreviewDirty(); }
                 if (ScrollAdjust(ref cy, 0.001f, 0f, 1f))
                 { layer.UvCenter = new Vector2(cx, cy); MarkPreviewDirty(); }
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("中心点 Y");
 
-                var lockIcon = scaleLocked ? FontAwesomeIcon.Link : FontAwesomeIcon.Unlink;
-                if (ImGuiComponents.IconButton(30, lockIcon))
-                    scaleLocked = !scaleLocked;
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip(scaleLocked ? "比例锁定" : "比例解锁");
-                ImGui.SameLine();
-                ImGui.SetNextItemWidth(-1);
+                ImGui.AlignTextToFramePadding(); ImGui.Text("大小"); ImGui.SameLine(labelW);
                 var uvScale = layer.UvScale;
+                var lockBtnWidth = ImGui.GetFrameHeight();
+                ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - lockBtnWidth - ImGui.GetStyle().ItemSpacing.X);
                 if (scaleLocked)
                 {
                     var s = uvScale.X;
@@ -894,43 +1170,62 @@ public class MainWindow : Window, IDisposable
                     if (ImGui.DragFloat2("##scaleUnlocked", ref uvScale, 0.005f, 0.01f, 2f, "%.3f"))
                     { layer.UvScale = uvScale; MarkPreviewDirty(); }
                 }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("大小 ");
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("大小");
+                ImGui.SameLine();
+                var lockIcon = scaleLocked ? FontAwesomeIcon.Link : FontAwesomeIcon.Unlink;
+                if (ImGuiComponents.IconButton(30, lockIcon))
+                    scaleLocked = !scaleLocked;
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip(scaleLocked ? "比例锁定" : "比例解锁");
 
+                ImGui.AlignTextToFramePadding(); ImGui.Text("旋转"); ImGui.SameLine(labelW);
                 ImGui.SetNextItemWidth(-1);
                 var rot = layer.RotationDeg;
                 if (ImGui.DragFloat("##rot", ref rot, 1f, -180f, 180f, "%.1f°"))
                 { layer.RotationDeg = rot; MarkPreviewDirty(); }
                 if (ScrollAdjust(ref rot, 1f, -180f, 180f))
                 { layer.RotationDeg = rot; MarkPreviewDirty(); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("旋转 ");
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("旋转");
             }
 
             if (ImGui.CollapsingHeader("渲染", ImGuiTreeNodeFlags.DefaultOpen))
             {
+                var labelW2 = 56f;
+                ImGui.AlignTextToFramePadding(); ImGui.Text("透明度"); ImGui.SameLine(labelW2);
                 ImGui.SetNextItemWidth(-1);
                 var opacity = layer.Opacity;
                 if (ImGui.DragFloat("##opacity", ref opacity, 0.01f, 0f, 1f, "%.2f"))
                 { layer.Opacity = opacity; MarkPreviewDirty(); }
                 if (ScrollAdjust(ref opacity, 0.02f, 0f, 1f))
                 { layer.Opacity = opacity; MarkPreviewDirty(); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("不透明度 ");
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("不透明度");
 
+                ImGui.AlignTextToFramePadding(); ImGui.Text("混合"); ImGui.SameLine(labelW2);
                 ImGui.SetNextItemWidth(-1);
                 var blendIdx = Array.IndexOf(BlendModeValues, layer.BlendMode);
                 if (blendIdx < 0) blendIdx = 0;
                 if (ImGui.Combo("##blend", ref blendIdx, BlendModeNames, BlendModeNames.Length))
                 { layer.BlendMode = BlendModeValues[blendIdx]; MarkPreviewDirty(); }
 
+                ImGui.AlignTextToFramePadding(); ImGui.Text("裁剪"); ImGui.SameLine(labelW2);
+                ImGui.SetNextItemWidth(-1);
+                var clipIdx = (int)layer.Clip;
+                if (ImGui.Combo("##clip", ref clipIdx, ClipModeNames, ClipModeNames.Length))
+                { layer.Clip = (ClipMode)clipIdx; MarkPreviewDirty(); }
+
                 var affDiff = layer.AffectsDiffuse;
                 if (ImGui.Checkbox("贴图", ref affDiff))
-                { layer.AffectsDiffuse = affDiff; MarkPreviewDirty(); }
+                {
+                    layer.AffectsDiffuse = affDiff;
+                    previewService.ResetSwapState();
+                    MarkPreviewDirty();
+                }
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("将贴花颜色合成到漫反射贴图。\n关闭后贴花不上色，但仍可作为发光区域。");
                 ImGui.SameLine();
                 var affEmissive = layer.AffectsEmissive;
                 if (ImGui.Checkbox("发光", ref affEmissive))
                 {
                     layer.AffectsEmissive = affEmissive;
-                    if (!affEmissive) previewService.ClearEmissiveHookTargets();
+                    previewService.ResetSwapState();
                     MarkPreviewDirty();
                 }
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("修改材质启用发光效果");
@@ -943,6 +1238,7 @@ public class MainWindow : Window, IDisposable
                     ImGui.SameLine();
                     ImGui.Text("发光颜色");
 
+                    ImGui.AlignTextToFramePadding(); ImGui.Text("强度"); ImGui.SameLine(labelW2);
                     ImGui.SetNextItemWidth(-1);
                     var emIntensity = layer.EmissiveIntensity;
                     if (ImGui.DragFloat("##emIntensity", ref emIntensity, 0.05f, 0.1f, 10f, "%.2f"))
@@ -951,6 +1247,7 @@ public class MainWindow : Window, IDisposable
                     { layer.EmissiveIntensity = emIntensity; MarkPreviewDirty(); TryDirectEmissiveUpdate(group, layer); }
                     if (ImGui.IsItemHovered()) ImGui.SetTooltip("发光强度");
 
+                    ImGui.AlignTextToFramePadding(); ImGui.Text("遮罩"); ImGui.SameLine(labelW2);
                     ImGui.SetNextItemWidth(-1);
                     var maskIdx = (int)layer.EmissiveMask;
                     if (ImGui.Combo("##emMask", ref maskIdx, EmissiveMaskNames, EmissiveMaskNames.Length))
@@ -959,6 +1256,7 @@ public class MainWindow : Window, IDisposable
 
                     if (layer.EmissiveMask != EmissiveMask.Uniform)
                     {
+                        ImGui.AlignTextToFramePadding(); ImGui.Text("羽化"); ImGui.SameLine(labelW2);
                         ImGui.SetNextItemWidth(-1);
                         var falloff = layer.EmissiveMaskFalloff;
                         if (ImGui.DragFloat("##emFalloff", ref falloff, 0.01f, 0.01f, 1f, "%.2f"))
@@ -970,25 +1268,28 @@ public class MainWindow : Window, IDisposable
 
                     if (layer.EmissiveMask == EmissiveMask.DirectionalGradient)
                     {
+                        ImGui.AlignTextToFramePadding(); ImGui.Text("角度"); ImGui.SameLine(labelW2);
                         ImGui.SetNextItemWidth(-1);
                         var gAngle = layer.GradientAngleDeg;
-                        if (ImGui.DragFloat("##gradAngle", ref gAngle, 1f, -180f, 180f, "角度 %.1f°"))
+                        if (ImGui.DragFloat("##gradAngle", ref gAngle, 1f, -180f, 180f, "%.1f°"))
                         { layer.GradientAngleDeg = gAngle; MarkPreviewDirty(); }
                         if (ScrollAdjust(ref gAngle, 1f, -180f, 180f))
                         { layer.GradientAngleDeg = gAngle; MarkPreviewDirty(); }
                         if (ImGui.IsItemHovered()) ImGui.SetTooltip("渐变方向角度");
 
+                        ImGui.AlignTextToFramePadding(); ImGui.Text("范围"); ImGui.SameLine(labelW2);
                         ImGui.SetNextItemWidth(-1);
                         var gScale = layer.GradientScale;
-                        if (ImGui.DragFloat("##gradScale", ref gScale, 0.01f, 0.1f, 2f, "范围 %.2f"))
+                        if (ImGui.DragFloat("##gradScale", ref gScale, 0.01f, 0.1f, 2f, "%.2f"))
                         { layer.GradientScale = gScale; MarkPreviewDirty(); }
                         if (ScrollAdjust(ref gScale, 0.05f, 0.1f, 2f))
                         { layer.GradientScale = gScale; MarkPreviewDirty(); }
                         if (ImGui.IsItemHovered()) ImGui.SetTooltip("渐变扩散范围");
 
+                        ImGui.AlignTextToFramePadding(); ImGui.Text("偏移"); ImGui.SameLine(labelW2);
                         ImGui.SetNextItemWidth(-1);
                         var gOff = layer.GradientOffset;
-                        if (ImGui.DragFloat("##gradOffset", ref gOff, 0.01f, -1f, 1f, "偏移 %.2f"))
+                        if (ImGui.DragFloat("##gradOffset", ref gOff, 0.01f, -1f, 1f, "%.2f"))
                         { layer.GradientOffset = gOff; MarkPreviewDirty(); }
                         if (ScrollAdjust(ref gOff, 0.02f, -1f, 1f))
                         { layer.GradientOffset = gOff; MarkPreviewDirty(); }
@@ -1100,15 +1401,6 @@ public class MainWindow : Window, IDisposable
         var group = project.SelectedGroup;
         var hasTarget = group != null && !string.IsNullOrEmpty(group.DiffuseGamePath);
 
-        if (!config.AutoPreview)
-        {
-            using (ImRaii.Disabled(!hasTarget))
-            {
-                if (ImGui.Button("更新预览", new Vector2(-1, 26)))
-                    TriggerPreview();
-            }
-        }
-
         if (config.AutoPreview && previewDirty && hasTarget)
         {
             if (previewService.CanSwapInPlace && config.UseGpuSwap)
@@ -1143,6 +1435,7 @@ public class MainWindow : Window, IDisposable
         }
 
         previewService.UpdatePreview(project);
+        ModelEditorWindowRef?.MarkTexturesDirty();
     }
 
     private void AutoDetectMtrl(TargetGroup group)
@@ -1242,24 +1535,6 @@ public class MainWindow : Window, IDisposable
         lastDirtyTime = now;
     }
 
-    private unsafe void HighlightEmissive(Vector3 color)
-    {
-        var group = project.SelectedGroup;
-        if (group == null || string.IsNullOrEmpty(group.MtrlGamePath))
-        {
-            DebugServer.AppendLog($"[Highlight] Skip: group={group?.Name} mtrl={group?.MtrlGamePath}");
-            return;
-        }
-
-        var charBase = previewService.GetCharacterBase();
-        if (charBase == null)
-        {
-            DebugServer.AppendLog("[Highlight] Skip: charBase=null");
-            return;
-        }
-
-        previewService.HighlightEmissiveColor(charBase, group, color);
-    }
 
     private unsafe void TryDirectEmissiveUpdate(TargetGroup group, DecalLayer layer)
     {
@@ -1552,6 +1827,7 @@ public class MainWindow : Window, IDisposable
         // Re-find the Mtrl node in the refreshed tree
         ResourceNodeDto? freshMtrl = null;
         ResourceNodeDto? freshMdl = null;
+        var extraMdls = new List<ResourceNodeDto>();
         if (cachedTrees != null)
         {
             foreach (var (_, tree) in cachedTrees)
@@ -1567,15 +1843,20 @@ public class MainWindow : Window, IDisposable
                                 n.Type == ResourceType.Tex && n.GamePath == diffuseGp) != null);
                         if (!match) continue;
 
-                        freshMtrl = candidate;
-                        // Find the parent Mdl
-                        freshMdl = FindAncestorMdl(topNode, candidate);
-                        goto found;
+                        var mdl = FindAncestorMdl(topNode, candidate);
+                        if (freshMtrl == null)
+                        {
+                            freshMtrl = candidate;
+                            freshMdl = mdl;
+                        }
+                        else if (mdl != null && mdl != freshMdl)
+                        {
+                            extraMdls.Add(mdl);
+                        }
                     }
                 }
             }
         }
-        found:
         freshMtrl ??= mtrlNode;
         freshMdl ??= parentMdl;
 
@@ -1607,12 +1888,18 @@ public class MainWindow : Window, IDisposable
         tg.MtrlDiskPath = GetDiskPath(freshMtrl);
         tg.OrigMtrlDiskPath = tg.MtrlDiskPath;
 
-        // Mesh from parent Mdl
+        // Mesh from parent Mdl (primary + extra models sharing the same texture)
         if (freshMdl != null)
         {
-            var meshPath = GetDiskPath(freshMdl);
-            tg.MeshDiskPath = meshPath;
-            previewService.LoadMesh(meshPath);
+            tg.MeshDiskPath = GetDiskPath(freshMdl);
+            foreach (var extra in extraMdls)
+            {
+                var extraPath = GetDiskPath(extra);
+                if (!string.IsNullOrEmpty(extraPath) && extraPath != tg.MeshDiskPath)
+                    tg.MeshDiskPaths.Add(extraPath);
+            }
+            previewService.LoadMeshes(tg.AllMeshPaths);
+            ModelEditorWindowRef?.OnMeshChanged();
         }
 
         config.Save();

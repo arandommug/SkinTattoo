@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Numerics;
 using System.Runtime.InteropServices;
@@ -25,6 +26,7 @@ public unsafe class TextureSwapService
 {
     private readonly IObjectTable objectTable;
     private readonly IPluginLog log;
+    private readonly HashSet<string> loggedEmissiveNotFound = new(StringComparer.OrdinalIgnoreCase);
 
     private const TexFlags CreateFlags =
         TexFlags.TextureType2D | TexFlags.Managed | TexFlags.Immutable;
@@ -330,7 +332,9 @@ public unsafe class TextureSwapService
             }
         }
 
-        DebugServer.AppendLog($"[TextureSwap] Emissive NOT FOUND mtrl={mtrlGamePath} disk={mtrlDiskPath ?? "null"}");
+        // Only log once per mtrl to avoid spam (skin.shpk has no ColorTable, handled by CBuffer hook)
+        if (loggedEmissiveNotFound.Add(mtrlGamePath))
+            DebugServer.AppendLog($"[TextureSwap] Emissive ColorTable not found (skin.shpk?): {mtrlGamePath}");
         return false;
     }
 

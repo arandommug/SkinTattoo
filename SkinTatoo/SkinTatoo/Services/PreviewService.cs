@@ -59,6 +59,19 @@ public class PreviewService : IDisposable
     /// <summary>Number of paths currently initialized for GPU swap.</summary>
     public int InitializedPathCount => initializedRedirects.Count;
 
+    // 3D editor integration: per-group composite results keyed by diffuseGamePath
+    private readonly Dictionary<string, (byte[] Data, int Width, int Height)> compositeResults = new(StringComparer.OrdinalIgnoreCase);
+    private long compositeVersion;
+    public bool ExternalDirty { get; set; }
+    public (byte[] Data, int Width, int Height)? GetCompositeForGroup(string? diffuseGamePath)
+    {
+        if (diffuseGamePath != null && compositeResults.TryGetValue(diffuseGamePath, out var result))
+            return result;
+        return null;
+    }
+    public long CompositeVersion => compositeVersion;
+    public void MarkDirty() => ExternalDirty = true;
+
     /// <summary>Last update mode used.</summary>
     public string LastUpdateMode { get; private set; } = "none";
 
@@ -114,6 +127,26 @@ public class PreviewService : IDisposable
         currentMesh = meshData;
         DebugServer.AppendLog($"[PreviewService] Mesh loaded: {meshData.Vertices.Length} verts, {meshData.TriangleCount} tris");
         return true;
+    }
+
+    public bool LoadMeshes(List<string> paths)
+    {
+        if (paths.Count == 0) return false;
+        if (paths.Count == 1) return LoadMesh(paths[0]);
+
+        DebugServer.AppendLog($"[PreviewService] LoadMeshes: {paths.Count} files");
+        try
+        {
+            var merged = meshExtractor.ExtractAndMerge(paths);
+            if (merged == null) return false;
+            currentMesh = merged;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            log.Error(ex, $"LoadMeshes exception: {ex.Message}");
+            return false;
+        }
     }
 
     /// <summary>Update preview — auto-selects full redraw or async in-place GPU swap.</summary>
@@ -175,6 +208,86 @@ public class PreviewService : IDisposable
         // Always set hook target for materials with known CBuffer offset (skin.shpk etc.)
         if (emissiveHook != null && cbufOffset > 0)
             emissiveHook.SetTargetByPath(charBase, group.MtrlGamePath!, mtrlDiskPath, color);
+    }
+
+    /// <summary>
+    /// Ensure emissive mtrl redirect is initialized for a group (for highlight preview).
+    /// Does a one-time mtrl build + Penumbra redirect + player redraw if needed.
+    /// Returns true if emissive is ready for highlight.
+    /// </summary>
+    public bool EnsureEmissiveInitialized(TargetGroup group)
+    {
+        if (string.IsNullOrEmpty(group.MtrlGamePath)) return false;
+
+        // Already initialized?
+        if (emissiveOffsets.ContainsKey(group.MtrlGamePath!) && emissiveOffsets[group.MtrlGamePath!] > 0)
+            return true;
+
+        // Build emissive mtrl
+        var mtrlDisk = group.OrigMtrlDiskPath ?? group.MtrlDiskPath;
+        if (string.IsNullOrEmpty(mtrlDisk) && string.IsNullOrEmpty(group.MtrlGamePath)) return false;
+
+        var safeName = MakeSafeFileName(group.Name);
+        var mtrlOutPath = Path.Combine(outputDir, $"preview_{safeName}.mtrl");
+        var defaultColor = new Vector3(1f, 1f, 1f);
+
+        if (!TryBuildEmissiveMtrl(mtrlDisk ?? group.MtrlGamePath!, mtrlOutPath, defaultColor, out var emOffset))
+            return false;
+
+        var redirects = new Dictionary<string, string> { [group.MtrlGamePath!] = mtrlOutPath };
+        previewMtrlDiskPaths[group.MtrlGamePath!] = mtrlOutPath;
+        if (emOffset >= 0)
+            emissiveOffsets[group.MtrlGamePath!] = emOffset;
+        initializedRedirects.Add(group.MtrlGamePath!);
+        previewDiskPaths[group.MtrlGamePath!] = mtrlOutPath;
+
+        // Also build norm with full-white alpha mask so highlight covers entire decal area
+        if (!string.IsNullOrEmpty(group.NormGamePath) && !string.IsNullOrEmpty(group.NormDiskPath))
+        {
+            var normDisk = group.OrigNormDiskPath ?? group.NormDiskPath;
+            if (!string.IsNullOrEmpty(normDisk))
+            {
+                var baseTex = LoadBaseTexture(group);
+                var normResult = BuildFullAlphaNorm(normDisk, baseTex.Width, baseTex.Height);
+                if (normResult != null)
+                {
+                    var normPath = Path.Combine(outputDir, $"preview_{safeName}_n.tex");
+                    WriteBgraTexFile(normPath, normResult, baseTex.Width, baseTex.Height);
+                    redirects[group.NormGamePath!] = normPath;
+                    initializedRedirects.Add(group.NormGamePath!);
+                    previewDiskPaths[group.NormGamePath!] = normPath;
+                }
+            }
+        }
+
+        penumbra.SetTextureRedirects(redirects);
+        penumbra.RedrawPlayer();
+        DebugServer.AppendLog($"[PreviewService] Emissive initialized for highlight: {group.MtrlGamePath} offset={emOffset}");
+        return emOffset >= 0;
+    }
+
+    /// <summary>Build a normal map with alpha=255 everywhere (full emissive coverage for highlight).</summary>
+    private byte[]? BuildFullAlphaNorm(string normDiskPath, int w, int h)
+    {
+        byte[] baseNorm;
+        if (baseTextureCache.TryGetValue(normDiskPath, out var cachedNorm))
+        {
+            var (data, iw, ih) = cachedNorm;
+            baseNorm = (iw != w || ih != h) ? ResizeBilinear(data, iw, ih, w, h) : (byte[])data.Clone();
+        }
+        else
+        {
+            var normImg = File.Exists(normDiskPath) ? imageLoader.LoadImage(normDiskPath) : LoadGameTexture(normDiskPath);
+            if (normImg == null) return null;
+            baseTextureCache[normDiskPath] = normImg.Value;
+            var (data, iw, ih) = normImg.Value;
+            baseNorm = (iw != w || ih != h) ? ResizeBilinear(data, iw, ih, w, h) : (byte[])data.Clone();
+        }
+
+        // Set alpha to 255 everywhere for full highlight coverage
+        for (int i = 3; i < baseNorm.Length; i += 4)
+            baseNorm[i] = 255;
+        return baseNorm;
     }
 
     /// <summary>Force a full Penumbra redraw update (always flickers).</summary>
@@ -280,6 +393,8 @@ public class PreviewService : IDisposable
                     var rgba = CpuUvComposite(layers, baseTex.Data, baseTex.Width, baseTex.Height);
                     if (rgba != null)
                     {
+                        compositeResults[job.DiffuseGamePath] = (rgba, baseTex.Width, baseTex.Height);
+                        Interlocked.Increment(ref compositeVersion);
                         if (job.DiskPath != null)
                             WriteBgraTexFile(job.DiskPath, rgba, baseTex.Width, baseTex.Height);
                         var bgra = TextureSwapService.RgbaToBgra(rgba);
@@ -330,6 +445,7 @@ public class PreviewService : IDisposable
         public Vector2 UvCenter, UvScale;
         public float RotationDeg, Opacity;
         public BlendMode BlendMode;
+        public ClipMode Clip;
         public EmissiveMask EmissiveMask;
         public float EmissiveMaskFalloff;
         public Vector3 EmissiveColor;
@@ -343,6 +459,7 @@ public class PreviewService : IDisposable
             IsVisible = l.IsVisible; AffectsDiffuse = l.AffectsDiffuse; AffectsEmissive = l.AffectsEmissive;
             ImagePath = l.ImagePath; UvCenter = l.UvCenter; UvScale = l.UvScale;
             RotationDeg = l.RotationDeg; Opacity = l.Opacity; BlendMode = l.BlendMode;
+            Clip = l.Clip;
             EmissiveMask = l.EmissiveMask; EmissiveMaskFalloff = l.EmissiveMaskFalloff;
             EmissiveColor = l.EmissiveColor; EmissiveIntensity = l.EmissiveIntensity;
             GradientAngleDeg = l.GradientAngleDeg; GradientScale = l.GradientScale;
@@ -354,6 +471,7 @@ public class PreviewService : IDisposable
             IsVisible = IsVisible, AffectsDiffuse = AffectsDiffuse, AffectsEmissive = AffectsEmissive,
             ImagePath = ImagePath, UvCenter = UvCenter, UvScale = UvScale,
             RotationDeg = RotationDeg, Opacity = Opacity, BlendMode = BlendMode,
+            Clip = Clip,
             EmissiveMask = EmissiveMask, EmissiveMaskFalloff = EmissiveMaskFalloff,
             EmissiveColor = EmissiveColor, EmissiveIntensity = EmissiveIntensity,
             GradientAngleDeg = GradientAngleDeg, GradientScale = GradientScale,
@@ -418,6 +536,16 @@ public class PreviewService : IDisposable
 
             if (group.HasEmissiveLayers())
             {
+                // If emissive layers exist but mtrl was never redirected, need full redraw
+                if (!string.IsNullOrEmpty(group.MtrlGamePath)
+                    && !previewDiskPaths.ContainsKey(group.MtrlGamePath))
+                {
+                    DebugServer.AppendLog(
+                        $"[PreviewService] CanSwap=NO new emissive needs mtrl init: {group.MtrlGamePath}");
+                    CanSwapInPlace = false;
+                    return false;
+                }
+
                 if (!string.IsNullOrEmpty(group.NormGamePath)
                     && previewDiskPaths.ContainsKey(group.NormGamePath)
                     && !initializedRedirects.Contains(group.NormGamePath))
@@ -484,6 +612,9 @@ public class PreviewService : IDisposable
         var diffResult = CpuUvComposite(group.Layers, baseTex.Data, w, h);
         if (diffResult != null)
         {
+            compositeResults[group.DiffuseGamePath!] = (diffResult, w, h);
+            Interlocked.Increment(ref compositeVersion);
+
             var safeName = MakeSafeFileName(group.Name);
             var path = Path.Combine(outputDir, $"preview_{safeName}_d.tex");
             WriteBgraTexFile(path, diffResult, w, h);
@@ -606,6 +737,13 @@ public class PreviewService : IDisposable
                     float ru = lu * cosR + lv * sinR;
                     float rv = -lu * sinR + lv * cosR;
                     if (ru < -0.5f || ru > 0.5f || rv < -0.5f || rv > 0.5f) continue;
+                    switch (layer.Clip)
+                    {
+                        case ClipMode.ClipLeft when ru < 0f: continue;
+                        case ClipMode.ClipRight when ru >= 0f: continue;
+                        case ClipMode.ClipTop when rv < 0f: continue;
+                        case ClipMode.ClipBottom when rv >= 0f: continue;
+                    }
 
                     float du = (ru + 0.5f) * decalW - 0.5f;
                     float dv = (rv + 0.5f) * decalH - 0.5f;
@@ -757,6 +895,13 @@ public class PreviewService : IDisposable
                     float ru = lu * cosR + lv * sinR;
                     float rv = -lu * sinR + lv * cosR;
                     if (ru < -0.5f || ru > 0.5f || rv < -0.5f || rv > 0.5f) continue;
+                    switch (layer.Clip)
+                    {
+                        case ClipMode.ClipLeft when ru < 0f: continue;
+                        case ClipMode.ClipRight when ru >= 0f: continue;
+                        case ClipMode.ClipTop when rv < 0f: continue;
+                        case ClipMode.ClipBottom when rv >= 0f: continue;
+                    }
 
                     float du = (ru + 0.5f) * decalW - 0.5f;
                     float dv = (rv + 0.5f) * decalH - 0.5f;
@@ -772,9 +917,64 @@ public class PreviewService : IDisposable
                     float bg = output[oIdx + 1] / 255f;
                     float bb = output[oIdx + 2] / 255f;
 
-                    output[oIdx]     = (byte)Math.Clamp((int)((dr * da + br * (1 - da)) * 255), 0, 255);
-                    output[oIdx + 1] = (byte)Math.Clamp((int)((dg * da + bg * (1 - da)) * 255), 0, 255);
-                    output[oIdx + 2] = (byte)Math.Clamp((int)((db * da + bb * (1 - da)) * 255), 0, 255);
+                    float rr, rg, rb;
+                    switch (layer.BlendMode)
+                    {
+                        case BlendMode.Multiply:
+                            rr = br * dr; rg = bg * dg; rb = bb * db;
+                            break;
+                        case BlendMode.Screen:
+                            rr = 1f - (1f - br) * (1f - dr);
+                            rg = 1f - (1f - bg) * (1f - dg);
+                            rb = 1f - (1f - bb) * (1f - db);
+                            break;
+                        case BlendMode.Overlay:
+                            rr = br < 0.5f ? 2f * br * dr : 1f - 2f * (1f - br) * (1f - dr);
+                            rg = bg < 0.5f ? 2f * bg * dg : 1f - 2f * (1f - bg) * (1f - dg);
+                            rb = bb < 0.5f ? 2f * bb * db : 1f - 2f * (1f - bb) * (1f - db);
+                            break;
+                        case BlendMode.SoftLight:
+                            rr = (1f - 2f * dr) * br * br + 2f * dr * br;
+                            rg = (1f - 2f * dg) * bg * bg + 2f * dg * bg;
+                            rb = (1f - 2f * db) * bb * bb + 2f * db * bb;
+                            break;
+                        case BlendMode.HardLight:
+                            rr = dr < 0.5f ? 2f * br * dr : 1f - 2f * (1f - br) * (1f - dr);
+                            rg = dg < 0.5f ? 2f * bg * dg : 1f - 2f * (1f - bg) * (1f - dg);
+                            rb = db < 0.5f ? 2f * bb * db : 1f - 2f * (1f - bb) * (1f - db);
+                            break;
+                        case BlendMode.Darken:
+                            rr = Math.Min(br, dr); rg = Math.Min(bg, dg); rb = Math.Min(bb, db);
+                            break;
+                        case BlendMode.Lighten:
+                            rr = Math.Max(br, dr); rg = Math.Max(bg, dg); rb = Math.Max(bb, db);
+                            break;
+                        case BlendMode.ColorDodge:
+                            rr = dr >= 1f ? 1f : Math.Min(1f, br / (1f - dr));
+                            rg = dg >= 1f ? 1f : Math.Min(1f, bg / (1f - dg));
+                            rb = db >= 1f ? 1f : Math.Min(1f, bb / (1f - db));
+                            break;
+                        case BlendMode.ColorBurn:
+                            rr = dr <= 0f ? 0f : Math.Max(0f, 1f - (1f - br) / dr);
+                            rg = dg <= 0f ? 0f : Math.Max(0f, 1f - (1f - bg) / dg);
+                            rb = db <= 0f ? 0f : Math.Max(0f, 1f - (1f - bb) / db);
+                            break;
+                        case BlendMode.Difference:
+                            rr = Math.Abs(br - dr); rg = Math.Abs(bg - dg); rb = Math.Abs(bb - db);
+                            break;
+                        case BlendMode.Exclusion:
+                            rr = br + dr - 2f * br * dr;
+                            rg = bg + dg - 2f * bg * dg;
+                            rb = bb + db - 2f * bb * db;
+                            break;
+                        default:
+                            rr = dr; rg = dg; rb = db;
+                            break;
+                    }
+
+                    output[oIdx]     = (byte)Math.Clamp((int)((rr * da + br * (1 - da)) * 255), 0, 255);
+                    output[oIdx + 1] = (byte)Math.Clamp((int)((rg * da + bg * (1 - da)) * 255), 0, 255);
+                    output[oIdx + 2] = (byte)Math.Clamp((int)((rb * da + bb * (1 - da)) * 255), 0, 255);
                     output[oIdx + 3] = 255;
 
                     hitPixels++;

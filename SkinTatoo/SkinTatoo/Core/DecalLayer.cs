@@ -6,8 +6,16 @@ public enum BlendMode
 {
     Normal,
     Multiply,
+    Screen,
     Overlay,
     SoftLight,
+    HardLight,
+    Darken,
+    Lighten,
+    ColorDodge,
+    ColorBurn,
+    Difference,
+    Exclusion,
 }
 
 public enum EmissiveMask
@@ -19,6 +27,15 @@ public enum EmissiveMask
     DirectionalGradient, // linear gradient at configurable angle
     GaussianFeather,     // gaussian blur-style soft falloff from edges
     ShapeOutline,        // glow along decal alpha edges (like PS outer glow/drop shadow)
+}
+
+public enum ClipMode
+{
+    None,
+    ClipLeft,
+    ClipRight,
+    ClipTop,
+    ClipBottom,
 }
 
 public class DecalLayer
@@ -33,6 +50,7 @@ public class DecalLayer
 
     public float Opacity { get; set; } = 1.0f;
     public BlendMode BlendMode { get; set; } = BlendMode.Normal;
+    public ClipMode Clip { get; set; } = ClipMode.None;
     public bool IsVisible { get; set; } = true;
 
     public bool AffectsDiffuse { get; set; } = true;
