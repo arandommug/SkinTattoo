@@ -27,6 +27,7 @@ public class DebugServer : IDisposable
     private readonly PenumbraBridge _penumbra;
     private readonly PreviewService _preview;
     private readonly IDataManager _dataManager;
+    private readonly ModExportService _exportService;
 
     public static readonly ConcurrentQueue<string> LogBuffer = new();
     private const int MaxLogEntries = 200;
@@ -46,6 +47,7 @@ public class DebugServer : IDisposable
         PenumbraBridge penumbra,
         PreviewService preview,
         IDataManager dataManager,
+        ModExportService exportService,
         TextureSwapService? textureSwap = null)
     {
         _config   = config;
@@ -53,6 +55,7 @@ public class DebugServer : IDisposable
         _penumbra = penumbra;
         _preview  = preview;
         _dataManager = dataManager;
+        _exportService = exportService;
         _textureSwap = textureSwap;
     }
 
@@ -65,7 +68,7 @@ public class DebugServer : IDisposable
             .WithUrlPrefix(url)
             .WithMode(HttpListenerMode.EmbedIO))
             .WithWebApi("/api", m => m.WithController(() =>
-                new ApiController(_project, _penumbra, _preview, _config, _dataManager, _textureSwap)));
+                new ApiController(_project, _penumbra, _preview, _config, _dataManager, _exportService, _textureSwap)));
 
         _ = _server.RunAsync(_cts.Token).ContinueWith(t =>
         {
@@ -95,6 +98,7 @@ internal sealed class ApiController : WebApiController
     private readonly PreviewService _preview;
     private readonly Configuration _config;
     private readonly IDataManager _dataManager;
+    private readonly ModExportService _exportService;
     private readonly TextureSwapService? _textureSwap;
 
     private static readonly JsonSerializerOptions JsonOpts = new()
@@ -108,6 +112,7 @@ internal sealed class ApiController : WebApiController
         PreviewService preview,
         Configuration config,
         IDataManager dataManager,
+        ModExportService exportService,
         TextureSwapService? textureSwap = null)
     {
         _project  = project;
@@ -115,6 +120,7 @@ internal sealed class ApiController : WebApiController
         _preview  = preview;
         _config   = config;
         _dataManager = dataManager;
+        _exportService = exportService;
         _textureSwap = textureSwap;
     }
 
@@ -414,6 +420,71 @@ internal sealed class ApiController : WebApiController
                 result[$"obj_{objIdx}"] = filtered;
         }
         return result;
+    }
+
+    [Route(HttpVerbs.Post, "/export")]
+    public async Task<object> PostExport()
+    {
+        var body = await HttpContext.GetRequestBodyAsStringAsync();
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            HttpContext.Response.StatusCode = 400;
+            return new { error = "Empty body" };
+        }
+
+        // Body schema: { name, author?, version?, description?, target: "local"|"penumbra",
+        //                outputPath?, groupIndices?: [int...] }
+        try
+        {
+            var doc = JsonDocument.Parse(body);
+            var root = doc.RootElement;
+
+            var options = new Core.ModExportOptions
+            {
+                ModName = root.TryGetProperty("name", out var n) ? (n.GetString() ?? "") : "",
+                Author = root.TryGetProperty("author", out var a) ? (a.GetString() ?? "") : "",
+                Version = root.TryGetProperty("version", out var v) ? (v.GetString() ?? "1.0") : "1.0",
+                Description = root.TryGetProperty("description", out var d) ? (d.GetString() ?? "") : "",
+                Target = (root.TryGetProperty("target", out var t) && t.GetString() == "penumbra")
+                    ? Core.ExportTarget.InstallToPenumbra
+                    : Core.ExportTarget.LocalPmp,
+                OutputPmpPath = root.TryGetProperty("outputPath", out var op) ? op.GetString() : null,
+            };
+
+            if (root.TryGetProperty("groupIndices", out var giArr) && giArr.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var el in giArr.EnumerateArray())
+                {
+                    var idx = el.GetInt32();
+                    if (idx >= 0 && idx < _project.Groups.Count)
+                        options.SelectedGroups.Add(_project.Groups[idx]);
+                }
+            }
+            else
+            {
+                // Default: all groups with layers
+                foreach (var g in _project.Groups)
+                    if (g.Layers.Count > 0)
+                        options.SelectedGroups.Add(g);
+            }
+
+            // Run on background thread — Export is several seconds long, must not block EmbedIO listener
+            var result = await Task.Run(() => _exportService.Export(options));
+            HttpContext.Response.StatusCode = result.Success ? 200 : 500;
+            return new
+            {
+                success = result.Success,
+                message = result.Message,
+                pmpPath = result.PmpPath,
+                successGroups = result.SuccessGroups,
+                skippedGroups = result.SkippedGroups,
+            };
+        }
+        catch (Exception ex)
+        {
+            HttpContext.Response.StatusCode = 500;
+            return new { error = ex.Message };
+        }
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────

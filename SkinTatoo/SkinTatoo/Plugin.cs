@@ -20,6 +20,7 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService] public static IDataManager DataManager { get; private set; } = null!;
     [PluginService] public static IPluginLog Log { get; private set; } = null!;
     [PluginService] public static IObjectTable ObjectTable { get; private set; } = null!;
+    [PluginService] public static INotificationManager NotificationManager { get; private set; } = null!;
 
     private const string CommandName = "/skintatoo";
 
@@ -34,6 +35,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly MeshExtractor meshExtractor;
     private readonly DecalImageLoader imageLoader;
     private readonly PreviewService previewService;
+    private readonly ModExportService modExportService;
 
     // HTTP
     private readonly DebugServer debugServer;
@@ -47,6 +49,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly ConfigWindow configWindow;
     private readonly DebugWindow debugWindow;
     private readonly ModelEditorWindow modelEditorWindow;
+    private readonly ModExportWindow modExportWindow;
 
     // Auto-save throttle
     private DateTime lastAutoSave = DateTime.MinValue;
@@ -84,15 +87,18 @@ public sealed class Plugin : IDalamudPlugin
             meshExtractor, imageLoader,
             penumbra, textureSwap, emissiveHook, log, config, outputDir);
 
-        // 5. Project - restore from config
+        var exportTempDir = Path.Combine(pluginInterface.GetPluginConfigDirectory(), "export_temp");
+        modExportService = new ModExportService(previewService, penumbra, NotificationManager, log, exportTempDir);
+
+        // 4. Project - restore from config
         project = new DecalProject();
         project.LoadFromConfig(config);
 
-        // 6. HTTP
-        debugServer = new DebugServer(config, project, penumbra, previewService, dataManager, textureSwap);
+        // 5. HTTP
+        debugServer = new DebugServer(config, project, penumbra, previewService, dataManager, modExportService, textureSwap);
         debugServer.Start();
 
-        // 7. GUI
+        // 6. GUI
         mainWindow = new MainWindow(project, previewService, penumbra, config, textureProvider);
         configWindow = new ConfigWindow(config);
         debugWindow = new DebugWindow();
@@ -100,9 +106,12 @@ public sealed class Plugin : IDalamudPlugin
         // 3D Editor
         modelEditorWindow = new ModelEditorWindow(project, previewService, penumbra, pluginInterface.UiBuilder.DeviceHandle);
 
+        modExportWindow = new ModExportWindow(project, modExportService, config);
+
         mainWindow.DebugWindowRef = debugWindow;
         mainWindow.ConfigWindowRef = configWindow;
         mainWindow.ModelEditorWindowRef = modelEditorWindow;
+        mainWindow.ModExportWindowRef = modExportWindow;
         mainWindow.OnSaveRequested += SaveProject;
 
         windowSystem = new WindowSystem("SkinTatoo");
@@ -110,18 +119,19 @@ public sealed class Plugin : IDalamudPlugin
         windowSystem.AddWindow(configWindow);
         windowSystem.AddWindow(debugWindow);
         windowSystem.AddWindow(modelEditorWindow);
+        windowSystem.AddWindow(modExportWindow);
 
         // Restore window open states
         mainWindow.IsOpen = config.MainWindowOpen;
         debugWindow.IsOpen = config.DebugWindowOpen;
         modelEditorWindow.IsOpen = config.ModelEditorWindowOpen;
 
-        // 8. UiBuilder hooks
+        // 7. UiBuilder hooks
         pluginInterface.UiBuilder.Draw += DrawUi;
         pluginInterface.UiBuilder.OpenConfigUi += OpenConfigUi;
         pluginInterface.UiBuilder.OpenMainUi += OpenMainUi;
 
-        // 9. Chat command
+        // 8. Chat command
         commandManager.AddHandler(CommandName, new Dalamud.Game.Command.CommandInfo(OnCommand)
         {
             HelpMessage = "打开 SkinTatoo 纹身编辑器窗口",
@@ -178,6 +188,8 @@ public sealed class Plugin : IDalamudPlugin
         if (ObjectTable.LocalPlayer == null) return;
 
         autoLoadAttempted = true;
+        // One-shot: unsubscribe so we don't keep paying the per-frame check cost
+        framework.Update -= OnFrameworkUpdate;
 
         foreach (var group in project.Groups)
         {
@@ -209,6 +221,7 @@ public sealed class Plugin : IDalamudPlugin
         project.SaveToConfig(config);
         SaveWindowStates();
 
+        // OnFrameworkUpdate may have already unsubscribed itself; -= is safe either way
         framework.Update -= OnFrameworkUpdate;
         CommandManager.RemoveHandler(CommandName);
 
@@ -223,6 +236,7 @@ public sealed class Plugin : IDalamudPlugin
 
         debugServer.Dispose();
 
+        modExportService.Dispose();
         previewService.Dispose();
         emissiveHook.Dispose();
 

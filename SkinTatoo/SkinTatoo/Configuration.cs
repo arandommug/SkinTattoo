@@ -56,7 +56,7 @@ public class SavedTargetGroup
 [Serializable]
 public class Configuration : IPluginConfiguration
 {
-    public int Version { get; set; } = 2;
+    public int Version { get; set; } = 3;
     public int HttpPort { get; set; } = 14780;
     public int TextureResolution { get; set; } = 1024;
 
@@ -69,6 +69,11 @@ public class Configuration : IPluginConfiguration
     public string? LastImageDir { get; set; }
     public bool AutoPreview { get; set; }
     public bool UseGpuSwap { get; set; } = true;
+
+    // Mod export defaults
+    public string DefaultAuthor { get; set; } = "";
+    public string DefaultVersion { get; set; } = "1.0";
+    public string? LastExportDir { get; set; }
 
     [NonSerialized]
     private IDalamudPluginInterface? pluginInterface;

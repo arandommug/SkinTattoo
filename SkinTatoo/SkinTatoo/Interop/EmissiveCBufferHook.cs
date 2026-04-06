@@ -215,6 +215,7 @@ public unsafe class EmissiveCBufferHook : IDisposable
 
     public void Dispose()
     {
+        Disable();
         targets.Clear();
         offsetCache.Clear();
         hook?.Dispose();

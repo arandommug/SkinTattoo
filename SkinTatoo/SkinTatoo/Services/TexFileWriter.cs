@@ -1,6 +1,4 @@
-using System;
 using System.IO;
-using System.Runtime.InteropServices;
 
 namespace SkinTatoo.Services;
 
@@ -10,47 +8,40 @@ public static class TexFileWriter
     private const uint TextureFormatB8G8R8A8 = 0x1450;
     private const uint AttributeTextureType2D = 0x00800000;
 
-    public static void WriteUncompressed(string path, byte[] rgbaFloatData, int width, int height)
+    /// <summary>Write a B8G8R8A8 .tex file from an 8-bit RGBA byte array (swizzled to BGRA in-place during write).</summary>
+    public static void WriteRgba(string path, byte[] rgbaBytes, int width, int height)
     {
-        var pixelCount = width * height;
-        // Output as B8G8R8A8 (FFXIV convention: the 0x1450 format is BGRA order)
-        var byteData = new byte[pixelCount * 4];
-        var floatSpan = MemoryMarshal.Cast<byte, float>(rgbaFloatData);
-
-        for (var i = 0; i < pixelCount; i++)
+        var bgra = new byte[rgbaBytes.Length];
+        for (var i = 0; i < rgbaBytes.Length; i += 4)
         {
-            var r = FloatToByte(floatSpan[i * 4 + 0]);
-            var g = FloatToByte(floatSpan[i * 4 + 1]);
-            var b = FloatToByte(floatSpan[i * 4 + 2]);
-            var a = FloatToByte(floatSpan[i * 4 + 3]);
-            // BGRA order for FFXIV
-            byteData[i * 4 + 0] = b;
-            byteData[i * 4 + 1] = g;
-            byteData[i * 4 + 2] = r;
-            byteData[i * 4 + 3] = a;
+            bgra[i + 0] = rgbaBytes[i + 2]; // B
+            bgra[i + 1] = rgbaBytes[i + 1]; // G
+            bgra[i + 2] = rgbaBytes[i + 0]; // R
+            bgra[i + 3] = rgbaBytes[i + 3]; // A
         }
+        WriteBgra(path, bgra, width, height);
+    }
 
+    private static void WriteBgra(string path, byte[] bgra, int width, int height)
+    {
         // Use FileShare.Read so game/Penumbra can read while we write
         using var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read);
         using var bw = new BinaryWriter(fs);
 
-        bw.Write(AttributeTextureType2D);    // attributes (TextureType2D)
-        bw.Write(TextureFormatB8G8R8A8);     // format (B8G8R8A8)
-        bw.Write((ushort)width);             // width
-        bw.Write((ushort)height);            // height
-        bw.Write((ushort)1);                 // depth
-        bw.Write((ushort)1);                 // mip count
-        bw.Write(0u);                        // LOD offset 0
-        bw.Write(0u);                        // LOD offset 1
-        bw.Write(0u);                        // LOD offset 2
+        bw.Write(AttributeTextureType2D);
+        bw.Write(TextureFormatB8G8R8A8);
+        bw.Write((ushort)width);
+        bw.Write((ushort)height);
+        bw.Write((ushort)1);  // depth
+        bw.Write((ushort)1);  // mip count
+        bw.Write(0u);
+        bw.Write(0u);
+        bw.Write(0u);
 
         bw.Write(HeaderSize);                // surface 0 offset
         for (var i = 1; i < 13; i++)
             bw.Write(0u);                    // remaining surface offsets
 
-        bw.Write(byteData);
+        bw.Write(bgra);
     }
-
-    private static byte FloatToByte(float v) =>
-        (byte)Math.Clamp((int)(v * 255.0f + 0.5f), 0, 255);
 }

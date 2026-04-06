@@ -274,8 +274,8 @@ public unsafe class TextureSwapService
                 var halfCount = ctWidth * ctHeight * 4;
                 var byteSize = halfCount * sizeof(Half);
 
-                // Copy ColorTable data and modify emissive color in all rows
-                var copy = new Half[halfCount];
+                // ColorTable is small (typically 16 vec4 × 4 = 64 Halves = 128 bytes), stackalloc is safe
+                Span<Half> copy = stackalloc Half[halfCount];
                 fixed (Half* dst = copy)
                 {
                     Buffer.MemoryCopy(colorTableData, dst, byteSize, byteSize);
@@ -294,9 +294,12 @@ public unsafe class TextureSwapService
                 // Get ColorTable texture slot: flat index = slot * MaterialsPerSlot + matIdx
                 int flatIndex = s * CharacterBase.MaterialsPerSlot + m;
                 var texSlot = &ctTextures[flatIndex];
-                if (*texSlot == null) continue;
+                if (*texSlot == null)
+                {
+                    DebugServer.AppendLog($"[TextureSwap] Emissive ColorTable slot null at Model[{s}]Mat[{m}]");
+                    return false;
+                }
 
-                // Create new ColorTable texture and swap atomically
                 var newTex = GpuTexture.CreateTexture2D(
                     ctWidth, ctHeight, 1,
                     TexFormat.R16G16B16A16_FLOAT,
@@ -306,7 +309,7 @@ public unsafe class TextureSwapService
                 if (newTex == null)
                 {
                     DebugServer.AppendLog($"[TextureSwap] Emissive CreateTexture2D failed");
-                    continue;
+                    return false;
                 }
 
                 fixed (Half* dataPtr = copy)
@@ -315,7 +318,7 @@ public unsafe class TextureSwapService
                     {
                         newTex->DecRef();
                         DebugServer.AppendLog($"[TextureSwap] Emissive InitializeContents failed");
-                        continue;
+                        return false;
                     }
                 }
 
@@ -335,40 +338,6 @@ public unsafe class TextureSwapService
         // Only log once per mtrl to avoid spam (skin.shpk has no ColorTable, handled by CBuffer hook)
         if (loggedEmissiveNotFound.Add(mtrlGamePath))
             DebugServer.AppendLog($"[TextureSwap] Emissive ColorTable not found (skin.shpk?): {mtrlGamePath}");
-        return false;
-    }
-
-    private bool MaterialMatchesTexture(Material* mat, string gamePath, string? diskPath)
-    {
-        var texCount = mat->TextureCount;
-        if (texCount <= 0 || texCount > 32) return false;
-
-        var textures = mat->Textures;
-        if (!CanRead(textures, texCount * 0x18)) return false;
-
-        for (int t = 0; t < texCount; t++)
-        {
-            var texHandle = textures[t].Texture;
-            if (!CanRead(texHandle, 0x130)) continue;
-
-            string fn;
-            try { fn = ((ResourceHandle*)texHandle)->FileName.ToString(); }
-            catch { continue; }
-
-            if (string.IsNullOrEmpty(fn)) continue;
-            var normFn = fn.Replace('\\', '/').ToLowerInvariant();
-            var normGame = gamePath.Replace('\\', '/').ToLowerInvariant();
-            if (normFn.EndsWith(normGame) || normGame.EndsWith(normFn))
-                return true;
-            if (diskPath != null)
-            {
-                var normDisk = diskPath.Replace('/', '\\').ToLowerInvariant();
-                var normFnBack = fn.Replace('/', '\\').ToLowerInvariant();
-                if (normFnBack.EndsWith(normDisk) || normDisk.EndsWith(normFnBack))
-                    return true;
-            }
-        }
-
         return false;
     }
 

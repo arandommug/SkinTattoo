@@ -1,5 +1,16 @@
 # SkinTatoo 开发踩坑记录
 
+> 这是一份"过来人备忘录"，记录那些**只能踩进去才知道**的细节。新手向，不展开 API 文档已有的内容。
+
+## 目录
+- [国服 (CN) 环境](#国服-cn-环境)
+- [Penumbra IPC](#penumbra-ipc)
+- [.tex 文件格式](#tex-文件格式)
+- [合成 vs 投影](#uv-空间贴花-vs-3d-投影)
+- [游戏内贴图尺寸](#游戏内贴图尺寸)
+- [线程模型 / 状态隔离](#线程模型--状态隔离)
+- [Mod 导出](#mod-导出pmp-打包)
+
 ## 国服 (CN) 环境
 
 ### Dalamud SDK 路径
@@ -83,3 +94,40 @@
 - Eve 等高清 Mod：4096x4096
 - 输出分辨率应匹配或可配置
 - 底图需要缩放到 map 分辨率（最近邻插值足够）
+
+## 线程模型 / 状态隔离
+
+### `PreviewService` 的并发约束
+- `UpdatePreviewFull` 跑在主线程；`StartAsyncInPlace` 后台 `Task.Run`；`CompositeForExport` 也由后台 `Task.Run` 调用
+- 三条路径共享 `baseTextureCache` / `compositeResults` / `previewDiskPaths` / `previewMtrlDiskPaths` / `emissiveOffsets` / `initializedRedirects`
+- **必须用 `ConcurrentDictionary`**——之前用普通 `Dictionary` 导致滑动滑块时偶发 `InvalidOperationException` 和实时预览/导出互相污染状态
+- `EmissiveCBufferHook.targets` / `offsetCache` 也是 `ConcurrentDictionary`，因为 detour 跑在渲染线程、`SetTargetByPath` 跑在主线程
+
+### Lumina 临时文件不能用固定文件名
+- `TryBuildEmissiveMtrl` / `LoadGameTexture` 把 SqPack 字节流写到 `outputDir/temp_*.mtrl|tex` 然后调 `Lumina.GetFileFromDisk`
+- **必须用 GUID 后缀** (`temp_{Guid:N}.mtrl`)，否则主线程 + 后台线程同时调用会写同一个文件，互相覆盖 → 解析错位
+
+### `EmissiveCBufferHook.Dispose` 顺序
+- 先 `Disable()` 后 `hook.Dispose()`，否则 `hook.Dispose()` 内部可能在新线程上 detour 时遇到已清空的 dict
+- 限流计数器 `errorCount` 不会自动重置——首次 5 次错误后日志静默；调试时如果"看不到新错误"先重启插件
+
+### `Plugin.OnFrameworkUpdate` 是一次性的
+- 用于自动加载持久化的 mesh 路径
+- **第一次成功执行后必须 `framework.Update -= OnFrameworkUpdate;`**——否则之后每帧都会做一次条件检查，纯浪费
+
+## Mod 导出（.pmp 打包）
+
+### `InstallMod` IPC 是异步的
+- `Penumbra.Api.IpcSubscribers.InstallMod` 返回 `Success` 时只表示**入队**，Penumbra 真正读 .pmp 文件发生在 IPC 返回**之后**的 worker 线程上
+- 所以"安装到 Penumbra"的 .pmp **不能**写到临时文件然后立刻删
+- **解决**：写到 `<pluginConfigDir>/export_temp/install_pending.pmp` 这个固定路径，下次安装时被覆盖，`ModExportService.Dispose()` 时清理。构造函数里也清一次（处理上次崩溃残留）
+
+### `default_mod.json` 字段集
+- Penumbra 反序列化对缺字段是容忍的，但**少了 `FileSwaps` / `Manipulations` 这两个复合字段会用错的默认值**
+- 完整字段：`Version`, `Name`, `Description`, `Priority`, `Files`, `FileSwaps`, `Manipulations`
+- `Files` 的 key 是游戏路径、value 是相对 mod 根的路径，**两端都用正斜杠**（即使在 Windows 上）
+
+### HTTP `/api/export` 必须包到 `Task.Run`
+- `ModExportService.Export` 是同步的、合成 + 写 zip 几秒级
+- HTTP 端点直接 `await` 它会**阻塞 EmbedIO 监听线程**，期间所有其他 HTTP 请求都卡住
+- 修复：`var result = await Task.Run(() => _exportService.Export(options));`

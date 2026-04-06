@@ -19,6 +19,7 @@ public class PenumbraBridge : IDisposable
     private readonly ResolvePlayerPath resolvePlayerPath;
     private readonly GetPlayerResourcePaths getPlayerResourcePaths;
     private readonly GetPlayerResourceTrees getPlayerResourceTrees;
+    private readonly Penumbra.Api.IpcSubscribers.InstallMod installMod;
 
     private const string TempModTag = "SkinTatooDecal";
 
@@ -35,6 +36,7 @@ public class PenumbraBridge : IDisposable
         resolvePlayerPath = new ResolvePlayerPath(pluginInterface);
         getPlayerResourcePaths = new GetPlayerResourcePaths(pluginInterface);
         getPlayerResourceTrees = new GetPlayerResourceTrees(pluginInterface);
+        installMod = new Penumbra.Api.IpcSubscribers.InstallMod(pluginInterface);
 
         CheckAvailability();
     }
@@ -96,6 +98,25 @@ public class PenumbraBridge : IDisposable
         if (!IsAvailable) return;
         try { redrawObject.Invoke(0, RedrawType.Redraw); }
         catch (Exception ex) { log.Error(ex, "Failed to redraw player"); }
+    }
+
+    /// <summary>
+    /// Install a .pmp mod package into Penumbra. Returns the API error code.
+    /// </summary>
+    public PenumbraApiEc InstallMod(string pmpPath)
+    {
+        if (!IsAvailable) return PenumbraApiEc.SystemDisposed;
+        try
+        {
+            var ec = installMod.Invoke(pmpPath);
+            Http.DebugServer.AppendLog($"[PenumbraBridge] InstallMod({pmpPath}) → {ec}");
+            return ec;
+        }
+        catch (Exception ex)
+        {
+            log.Error(ex, "Failed to install mod");
+            return PenumbraApiEc.UnknownError;
+        }
     }
 
     public string? ResolvePlayer(string gamePath)

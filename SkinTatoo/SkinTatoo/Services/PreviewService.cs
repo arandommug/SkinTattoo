@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Numerics;
@@ -27,21 +28,23 @@ public class PreviewService : IDisposable
     private readonly string outputDir;
     private bool disposed;
 
-    // GPU swap state tracking
-    private readonly HashSet<string> initializedRedirects = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, string> previewDiskPaths = new(StringComparer.OrdinalIgnoreCase);
+    // GPU swap state tracking — ConcurrentDictionary because background composite Task and
+    // main thread (UpdatePreviewFull / EnsureEmissiveInitialized / ResetSwapState) can race.
+    private readonly ConcurrentDictionary<string, byte> initializedRedirects =
+        new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, string> previewDiskPaths =
+        new(StringComparer.OrdinalIgnoreCase);
 
-    // Cache base textures to avoid re-reading from disk on every update
-    private readonly Dictionary<string, (byte[] Data, int Width, int Height)> baseTextureCache = new();
+    // Cache base textures to avoid re-reading from disk on every update.
+    // Disk-path key has no encoding constraint, so default comparer is fine.
+    private readonly ConcurrentDictionary<string, (byte[] Data, int Width, int Height)> baseTextureCache = new();
 
     // Emissive ConstantBuffer offsets (mtrlGamePath → byte offset, used for full redraw .mtrl building)
-    private readonly Dictionary<string, int> emissiveOffsets = new();
+    private readonly ConcurrentDictionary<string, int> emissiveOffsets = new();
 
     // Track mtrl preview disk paths (mtrlGamePath → disk path for ColorTable matching)
-    private readonly Dictionary<string, string> previewMtrlDiskPaths = new(StringComparer.OrdinalIgnoreCase);
-
-    // Track emissive color to detect changes that need full redraw
-    private readonly Dictionary<string, Vector3> lastEmissiveColors = new();
+    private readonly ConcurrentDictionary<string, string> previewMtrlDiskPaths =
+        new(StringComparer.OrdinalIgnoreCase);
 
     // Async compositing
     private CancellationTokenSource? asyncCancel;
@@ -60,7 +63,8 @@ public class PreviewService : IDisposable
     public int InitializedPathCount => initializedRedirects.Count;
 
     // 3D editor integration: per-group composite results keyed by diffuseGamePath
-    private readonly Dictionary<string, (byte[] Data, int Width, int Height)> compositeResults = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, (byte[] Data, int Width, int Height)> compositeResults =
+        new(StringComparer.OrdinalIgnoreCase);
     private long compositeVersion;
     public bool ExternalDirty { get; set; }
     public (byte[] Data, int Width, int Height)? GetCompositeForGroup(string? diffuseGamePath)
@@ -238,7 +242,7 @@ public class PreviewService : IDisposable
         previewMtrlDiskPaths[group.MtrlGamePath!] = mtrlOutPath;
         if (emOffset >= 0)
             emissiveOffsets[group.MtrlGamePath!] = emOffset;
-        initializedRedirects.Add(group.MtrlGamePath!);
+        initializedRedirects.TryAdd(group.MtrlGamePath!, 0);
         previewDiskPaths[group.MtrlGamePath!] = mtrlOutPath;
 
         // Also build norm with full-white alpha mask so highlight covers entire decal area
@@ -254,7 +258,7 @@ public class PreviewService : IDisposable
                     var normPath = Path.Combine(outputDir, $"preview_{safeName}_n.tex");
                     WriteBgraTexFile(normPath, normResult, baseTex.Width, baseTex.Height);
                     redirects[group.NormGamePath!] = normPath;
-                    initializedRedirects.Add(group.NormGamePath!);
+                    initializedRedirects.TryAdd(group.NormGamePath!, 0);
                     previewDiskPaths[group.NormGamePath!] = normPath;
                 }
             }
@@ -316,16 +320,8 @@ public class PreviewService : IDisposable
             // Track initialized paths for future GPU swap
             foreach (var (gamePath, diskPath) in redirects)
             {
-                initializedRedirects.Add(gamePath);
+                initializedRedirects.TryAdd(gamePath, 0);
                 previewDiskPaths[gamePath] = diskPath;
-            }
-
-            // Snapshot emissive colors so we detect changes that need full redraw
-            foreach (var group in project.Groups)
-            {
-                if (string.IsNullOrEmpty(group.DiffuseGamePath)) continue;
-                if (group.HasEmissiveLayers())
-                    lastEmissiveColors[group.DiffuseGamePath] = GetCombinedEmissiveColor(group.Layers);
             }
 
             DebugServer.AppendLog(
@@ -499,11 +495,95 @@ public class PreviewService : IDisposable
         previewDiskPaths.Clear();
         emissiveOffsets.Clear();
         previewMtrlDiskPaths.Clear();
-        lastEmissiveColors.Clear();
         emissiveHook?.ClearTargets();
         CanSwapInPlace = false;
         LastUpdateMode = "none";
         DebugServer.AppendLog("[PreviewService] GPU swap state reset");
+    }
+
+    /// <summary>
+    /// Composite a group's textures into the given staging directory using
+    /// game-path mirrored layout, only including visible layers. Does NOT mutate
+    /// any PreviewService runtime state (GPU swap, caches, hook targets).
+    /// Returns gamePath → relative disk path (forward slashes) for default_mod.json.
+    /// </summary>
+    internal Dictionary<string, string> CompositeForExport(TargetGroup group, string stagingDir)
+    {
+        var redirects = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        if (string.IsNullOrEmpty(group.DiffuseGamePath))
+            return redirects;
+
+        // Build a temporary list of visible layers (skip hidden / null-image)
+        var visibleLayers = new List<DecalLayer>();
+        foreach (var l in group.Layers)
+        {
+            if (!l.IsVisible || string.IsNullOrEmpty(l.ImagePath)) continue;
+            visibleLayers.Add(l);
+        }
+        if (visibleLayers.Count == 0)
+            return redirects;
+
+        var baseTex = LoadBaseTexture(group);
+        int w = baseTex.Width, h = baseTex.Height;
+
+        // Diffuse composite — write to staging/<gamePath>
+        var diffResult = CpuUvComposite(visibleLayers, baseTex.Data, w, h);
+        if (diffResult != null)
+        {
+            var diffOut = WriteStagingTex(stagingDir, group.DiffuseGamePath!, diffResult, w, h);
+            redirects[group.DiffuseGamePath!] = diffOut;
+            DebugServer.AppendLog($"[ModExport] Diffuse → {group.DiffuseGamePath}");
+        }
+
+        // Emissive: only if there are visible emissive layers + mtrl path is known
+        bool hasEmissive = false;
+        foreach (var l in visibleLayers)
+            if (l.AffectsEmissive) { hasEmissive = true; break; }
+
+        if (hasEmissive && !string.IsNullOrEmpty(group.MtrlGamePath))
+        {
+            var emissiveColor = GetCombinedEmissiveColor(visibleLayers);
+            var mtrlSource = group.OrigMtrlDiskPath ?? group.MtrlDiskPath ?? group.MtrlGamePath!;
+            var mtrlOut = StagingPathFor(stagingDir, group.MtrlGamePath!);
+            Directory.CreateDirectory(Path.GetDirectoryName(mtrlOut)!);
+            if (TryBuildEmissiveMtrl(mtrlSource, mtrlOut, emissiveColor, out _))
+            {
+                redirects[group.MtrlGamePath!] = ToForwardSlash(group.MtrlGamePath!);
+                DebugServer.AppendLog($"[ModExport] Mtrl → {group.MtrlGamePath}");
+            }
+
+            // Emissive normal map (alpha mask)
+            if (!string.IsNullOrEmpty(group.NormGamePath) && !string.IsNullOrEmpty(group.NormDiskPath))
+            {
+                var normSource = group.OrigNormDiskPath ?? group.NormDiskPath!;
+                var normResult = CompositeEmissiveNorm(visibleLayers, normSource, w, h);
+                if (normResult != null)
+                {
+                    var normOut = WriteStagingTex(stagingDir, group.NormGamePath!, normResult, w, h);
+                    redirects[group.NormGamePath!] = normOut;
+                    DebugServer.AppendLog($"[ModExport] Norm (emissive alpha) → {group.NormGamePath}");
+                }
+            }
+        }
+
+        return redirects;
+    }
+
+    /// <summary>Map a game path to a staging-rooted disk path (mirrors game tree).</summary>
+    private static string StagingPathFor(string stagingDir, string gamePath)
+        => Path.Combine(stagingDir, gamePath.Replace('/', Path.DirectorySeparatorChar));
+
+    /// <summary>Convert any path to forward-slash form for default_mod.json.</summary>
+    private static string ToForwardSlash(string p) => p.Replace('\\', '/');
+
+    /// <summary>Write a composited RGBA buffer as .tex into staging at the game-path mirror.</summary>
+    private string WriteStagingTex(string stagingDir, string gamePath, byte[] rgba, int w, int h)
+    {
+        var diskPath = StagingPathFor(stagingDir, gamePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(diskPath)!);
+        WriteBgraTexFile(diskPath, rgba, w, h);
+        return ToForwardSlash(gamePath);
     }
 
     // ── Private: check if all groups can swap in-place ───────────────────────
@@ -526,7 +606,7 @@ public class PreviewService : IDisposable
             if (!previewDiskPaths.ContainsKey(group.DiffuseGamePath))
                 continue;
 
-            if (!initializedRedirects.Contains(group.DiffuseGamePath))
+            if (!initializedRedirects.ContainsKey(group.DiffuseGamePath))
             {
                 DebugServer.AppendLog(
                     $"[PreviewService] CanSwap=NO diffuse not initialized: {group.DiffuseGamePath}");
@@ -548,7 +628,7 @@ public class PreviewService : IDisposable
 
                 if (!string.IsNullOrEmpty(group.NormGamePath)
                     && previewDiskPaths.ContainsKey(group.NormGamePath)
-                    && !initializedRedirects.Contains(group.NormGamePath))
+                    && !initializedRedirects.ContainsKey(group.NormGamePath))
                 {
                     DebugServer.AppendLog(
                         $"[PreviewService] CanSwap=NO norm not initialized: {group.NormGamePath}");
@@ -558,7 +638,7 @@ public class PreviewService : IDisposable
 
                 if (!string.IsNullOrEmpty(group.MtrlGamePath)
                     && previewDiskPaths.ContainsKey(group.MtrlGamePath)
-                    && !initializedRedirects.Contains(group.MtrlGamePath))
+                    && !initializedRedirects.ContainsKey(group.MtrlGamePath))
                 {
                     DebugServer.AppendLog(
                         $"[PreviewService] CanSwap=NO mtrl not initialized: {group.MtrlGamePath}");
@@ -595,13 +675,10 @@ public class PreviewService : IDisposable
             return baseTex.Value;
         }
 
+        // Don't cache the empty fallback — next call should retry the load
         int r = config.TextureResolution;
-        var fallback = (new byte[r * r * 4], r, r);
-        baseTextureCache[diffuseDisk] = fallback;
-        return fallback;
+        return (new byte[r * r * 4], r, r);
     }
-
-    // ── Existing methods (unchanged) ─────────────────────────────────────────
 
     private void ProcessGroup(TargetGroup group, Dictionary<string, string> redirects)
     {
@@ -757,8 +834,7 @@ public class PreviewService : IDisposable
                             layer.GradientAngleDeg, layer.GradientScale, layer.EmissiveMaskFalloff, layer.GradientOffset);
                     else if (layer.EmissiveMask == EmissiveMask.ShapeOutline)
                     {
-                        // Sample neighbors to detect alpha edges
-                        float step = 1f / MathF.Max(decalW, decalH);
+                        // Sample 8 neighbors at 1-pixel offset to detect alpha edges
                         float sum = 0; int cnt = 0;
                         for (int dy = -1; dy <= 1; dy++)
                         for (int dx = -1; dx <= 1; dx++)
@@ -817,7 +893,8 @@ public class PreviewService : IDisposable
                 mtrlBytes = sqResult.Value.file.RawData.ToArray();
             }
 
-            var tempPath = Path.Combine(outputDir, "temp_orig.mtrl");
+            // Unique temp file: avoid races between concurrent main/background callers
+            var tempPath = Path.Combine(outputDir, $"temp_{Guid.NewGuid():N}.mtrl");
             File.WriteAllBytes(tempPath, mtrlBytes);
             var lumina = meshExtractor.GetLuminaForDisk();
             mtrl = lumina!.GetFileFromDisk<MtrlFile>(tempPath);
@@ -843,7 +920,8 @@ public class PreviewService : IDisposable
             if (sqResult == null) return null;
 
             var rawBytes = sqResult.Value.file.RawData.ToArray();
-            var tempPath = Path.Combine(outputDir, "temp_base.tex");
+            // Unique temp file: avoid races between concurrent main/background callers
+            var tempPath = Path.Combine(outputDir, $"temp_{Guid.NewGuid():N}.tex");
             File.WriteAllBytes(tempPath, rawBytes);
             var result = imageLoader.LoadImage(tempPath);
             try { File.Delete(tempPath); } catch { }
@@ -996,40 +1074,18 @@ public class PreviewService : IDisposable
 
     private static void WriteBgraTexFile(string path, byte[] rgbaData, int width, int height)
     {
-        // Retry with backoff — game may hold a read lock on the file
-        FileStream? fs = null;
+        // Retry — game/Penumbra may hold a transient lock during redraw
         for (int attempt = 0; attempt < 5; attempt++)
         {
             try
             {
-                fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.ReadWrite);
-                break;
+                TexFileWriter.WriteRgba(path, rgbaData, width, height);
+                return;
             }
             catch (IOException) when (attempt < 4)
             {
                 Thread.Sleep(10 * (attempt + 1));
             }
-        }
-        if (fs == null) return;
-        using var _ = fs;
-        using var bw = new BinaryWriter(fs);
-
-        bw.Write(0x00800000u);
-        bw.Write(0x1450u);
-        bw.Write((ushort)width);
-        bw.Write((ushort)height);
-        bw.Write((ushort)1);
-        bw.Write((ushort)1);
-        bw.Write(0u); bw.Write(0u); bw.Write(0u);
-        bw.Write(80u);
-        for (int i = 1; i < 13; i++) bw.Write(0u);
-
-        for (int i = 0; i < rgbaData.Length; i += 4)
-        {
-            bw.Write(rgbaData[i + 2]); // B
-            bw.Write(rgbaData[i + 1]); // G
-            bw.Write(rgbaData[i + 0]); // R
-            bw.Write(rgbaData[i + 3]); // A
         }
     }
 
@@ -1167,5 +1223,19 @@ public class PreviewService : IDisposable
     {
         if (disposed) return;
         disposed = true;
+
+        // Cancel any in-flight background composite so it can't write to cleared state
+        try { asyncCancel?.Cancel(); } catch { }
+        asyncCancel?.Dispose();
+        asyncCancel = null;
+        pendingBatch = null;
+
+        baseTextureCache.Clear();
+        compositeResults.Clear();
+        previewDiskPaths.Clear();
+        previewMtrlDiskPaths.Clear();
+        emissiveOffsets.Clear();
+        initializedRedirects.Clear();
+        emissiveHook?.ClearTargets();
     }
 }

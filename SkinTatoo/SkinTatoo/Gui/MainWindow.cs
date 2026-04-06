@@ -75,6 +75,7 @@ public class MainWindow : Window, IDisposable
     public DebugWindow? DebugWindowRef { get; set; }
     public ConfigWindow? ConfigWindowRef { get; set; }
     public ModelEditorWindow? ModelEditorWindowRef { get; set; }
+    public ModExportWindow? ModExportWindowRef { get; set; }
     public event Action? OnSaveRequested;
 
     public MainWindow(
@@ -254,6 +255,23 @@ public class MainWindow : Window, IDisposable
             }
         }
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("还原贴图 — 清除 Penumbra 重定向");
+
+        ImGui.SameLine();
+        using (ImRaii.Disabled(project.Groups.Count == 0))
+        {
+            if (ImGuiComponents.IconButton(7, FontAwesomeIcon.FileExport))
+                ModExportWindowRef?.OpenAs(Core.ExportTarget.LocalPmp);
+        }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("导出 Mod 到本地 (.pmp)");
+
+        ImGui.SameLine();
+        using (ImRaii.Disabled(project.Groups.Count == 0 || !penumbra.IsAvailable))
+        {
+            if (ImGuiComponents.IconButton(8, FontAwesomeIcon.Download))
+                ModExportWindowRef?.OpenAs(Core.ExportTarget.InstallToPenumbra);
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(penumbra.IsAvailable ? "安装 Mod 到 Penumbra" : "Penumbra 未运行");
 
         ImGui.SameLine();
         ImGui.Spacing();
@@ -2008,8 +2026,17 @@ public class MainWindow : Window, IDisposable
         layer.RotationDeg = d.RotationDeg;
         layer.Opacity = d.Opacity;
         layer.BlendMode = d.BlendMode;
+        layer.Clip = d.Clip;
         layer.IsVisible = d.IsVisible;
         layer.AffectsDiffuse = d.AffectsDiffuse;
+        layer.AffectsEmissive = d.AffectsEmissive;
+        layer.EmissiveColor = d.EmissiveColor;
+        layer.EmissiveIntensity = d.EmissiveIntensity;
+        layer.EmissiveMask = d.EmissiveMask;
+        layer.EmissiveMaskFalloff = d.EmissiveMaskFalloff;
+        layer.GradientAngleDeg = d.GradientAngleDeg;
+        layer.GradientScale = d.GradientScale;
+        layer.GradientOffset = d.GradientOffset;
     }
 
     private void SyncImagePathBuf()
@@ -2020,5 +2047,8 @@ public class MainWindow : Window, IDisposable
         imagePathBuf = layer?.ImagePath ?? string.Empty;
     }
 
-    public void Dispose() { }
+    public void Dispose()
+    {
+        OnSaveRequested = null;
+    }
 }
