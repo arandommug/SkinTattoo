@@ -67,9 +67,13 @@ public class MainWindow : Window, IDisposable
     private const double PreviewDebounceFullSec = 0.5;
     private const double PreviewMaxWaitFullSec = 1.5;
 
+    // v1 PBR: row pair exhaustion toast
+    private string? rowPairToast;
+    private DateTime rowPairToastUntil;
+
     private static readonly string[] BlendModeNames = ["正常", "正片叠底", "滤色", "叠加", "柔光", "强光", "变暗", "变亮", "颜色减淡", "颜色加深", "差值", "排除"];
     private static readonly BlendMode[] BlendModeValues = [BlendMode.Normal, BlendMode.Multiply, BlendMode.Screen, BlendMode.Overlay, BlendMode.SoftLight, BlendMode.HardLight, BlendMode.Darken, BlendMode.Lighten, BlendMode.ColorDodge, BlendMode.ColorBurn, BlendMode.Difference, BlendMode.Exclusion];
-    private static readonly string[] EmissiveMaskNames = ["均匀", "中心扩散", "边缘光环", "边缘描边", "方向渐变", "高斯羽化", "形状描边"];
+    private static readonly string[] LayerFadeMaskNames = ["均匀", "中心扩散", "边缘光环", "边缘描边", "方向渐变", "高斯羽化", "形状描边"];
     private static readonly string[] ClipModeNames = ["无裁剪", "切左半", "切右半", "切上半", "切下半"];
 
     public DebugWindow? DebugWindowRef { get; set; }
@@ -105,6 +109,31 @@ public class MainWindow : Window, IDisposable
         // Apply any completed async GPU swaps (non-blocking)
         previewService.ApplyPendingSwaps();
 
+        // v1 PBR: one-time migration notice (EmissiveMask → LayerFadeMask semantics widened)
+        if (config.ShowLayerFadeMaskMigrationNotice)
+        {
+            ImGui.OpenPopup("##layerFadeMigrate");
+        }
+        bool modalOpen = true;
+        if (ImGui.BeginPopupModal("##layerFadeMigrate", ref modalOpen,
+            ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoTitleBar))
+        {
+            ImGui.TextWrapped("项目已从旧版升级。");
+            ImGui.Separator();
+            ImGui.TextWrapped(
+                "注意：图层羽化（原\"发光遮罩\"）的行为有所变化——现在它会让该图层的所有 PBR 效果"
+                + "（包括漫反射、镜面反射、粗糙度、金属度、光泽等）一起按形状渐变，而不再仅影响发光。");
+            ImGui.TextWrapped("如果旧效果与预期不符，请检查图层羽化设置。");
+            ImGui.Separator();
+            if (ImGui.Button("我知道了", new Vector2(200, 0)))
+            {
+                config.ShowLayerFadeMaskMigrationNotice = false;
+                config.Save();
+                ImGui.CloseCurrentPopup();
+            }
+            ImGui.EndPopup();
+        }
+
         // Check if 3D editor triggered a change
         if (previewService.ExternalDirty)
         {
@@ -129,6 +158,30 @@ public class MainWindow : Window, IDisposable
 
         if (showHelpWindow)
             DrawHelpWindow();
+
+        // v1 PBR: row pair exhaustion toast
+        if (rowPairToast != null)
+        {
+            if (DateTime.UtcNow < rowPairToastUntil)
+            {
+                var vp = ImGui.GetMainViewport();
+                ImGui.SetNextWindowPos(
+                    vp.WorkPos + new Vector2(vp.WorkSize.X * 0.5f, 80),
+                    ImGuiCond.Always, new Vector2(0.5f, 0f));
+                if (ImGui.Begin("##rowPairToast",
+                    ImGuiWindowFlags.NoDecoration | ImGuiWindowFlags.AlwaysAutoResize
+                    | ImGuiWindowFlags.NoFocusOnAppearing | ImGuiWindowFlags.NoNav
+                    | ImGuiWindowFlags.NoSavedSettings))
+                {
+                    ImGui.TextColored(new Vector4(1f, 0.7f, 0.2f, 1f), rowPairToast);
+                }
+                ImGui.End();
+            }
+            else
+            {
+                rowPairToast = null;
+            }
+        }
     }
 
     private void UpdateHighlight()
@@ -534,7 +587,7 @@ public class MainWindow : Window, IDisposable
             layerCounter++;
             group.AddLayer($"贴花 {layerCounter}");
         }
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("添加图层");
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("添加贴花图层");
 
         ImGui.SameLine();
         var io = ImGui.GetIO();
@@ -545,8 +598,13 @@ public class MainWindow : Window, IDisposable
             if (ImGuiComponents.IconButton(21, FontAwesomeIcon.Trash))
             {
                 var idx = group.SelectedLayerIndex;
-                if (idx >= 0 && idx < group.Layers.Count && group.Layers[idx].AffectsEmissive)
-                    previewService.ResetSwapState();
+                if (idx >= 0 && idx < group.Layers.Count)
+                {
+                    var doomed = group.Layers[idx];
+                    if (doomed.AffectsEmissive)
+                        previewService.ResetSwapState();
+                    previewService.ForceReleaseRowPair(group, doomed);
+                }
                 group.RemoveLayer(idx);
                 MarkPreviewDirty();
             }
@@ -1229,97 +1287,113 @@ public class MainWindow : Window, IDisposable
                 var clipIdx = (int)layer.Clip;
                 if (ImGui.Combo("##clip", ref clipIdx, ClipModeNames, ClipModeNames.Length))
                 { layer.Clip = (ClipMode)clipIdx; MarkPreviewDirty(); }
+            }
 
-                var affDiff = layer.AffectsDiffuse;
-                if (ImGui.Checkbox("贴图", ref affDiff))
-                {
-                    layer.AffectsDiffuse = affDiff;
-                    previewService.ResetSwapState();
-                    MarkPreviewDirty();
-                }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("将贴花颜色合成到漫反射贴图。\n关闭后贴花不上色，但仍可作为发光区域。");
-                ImGui.SameLine();
-                var affEmissive = layer.AffectsEmissive;
-                if (ImGui.Checkbox("发光", ref affEmissive))
-                {
-                    layer.AffectsEmissive = affEmissive;
-                    previewService.ResetSwapState();
-                    MarkPreviewDirty();
-                }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("修改材质启用发光效果");
+            // ── PBR 属性 (v1) ────────────────────────────────
+            if (ImGui.CollapsingHeader("PBR 属性", ImGuiTreeNodeFlags.DefaultOpen))
+            {
+                var alloc = previewService.GetOrCreateAllocator(group);
+                bool exhausted = alloc.AvailableSlots == 0 && layer.AllocatedRowPair < 0;
 
+                if (exhausted)
+                {
+                    ImGui.TextColored(new Vector4(1f, 0.6f, 0.2f, 1f),
+                        $"⚠ 该材质 PBR 行号已满（vanilla 占 {alloc.VanillaOccupiedCount}）");
+                    ImGui.TextDisabled("请关闭其他图层的 PBR 字段后再试");
+                }
+
+                DrawPbrCheckbox(group, layer, "漫反射",
+                    () => layer.AffectsDiffuse, v => layer.AffectsDiffuse = v, exhausted);
+                if (layer.AffectsDiffuse)
+                {
+                    var d = layer.DiffuseColor;
+                    if (ImGui.ColorEdit3("##diffColor", ref d, ImGuiColorEditFlags.NoInputs | ImGuiColorEditFlags.NoLabel))
+                    { layer.DiffuseColor = d; MarkPreviewDirty(); }
+                }
+
+                DrawPbrCheckbox(group, layer, "镜面反射",
+                    () => layer.AffectsSpecular, v => layer.AffectsSpecular = v, exhausted);
+                if (layer.AffectsSpecular)
+                {
+                    var sc = layer.SpecularColor;
+                    if (ImGui.ColorEdit3("##specColor", ref sc, ImGuiColorEditFlags.NoInputs | ImGuiColorEditFlags.NoLabel))
+                    { layer.SpecularColor = sc; MarkPreviewDirty(); }
+                }
+
+                DrawPbrCheckbox(group, layer, "发光",
+                    () => layer.AffectsEmissive, v => layer.AffectsEmissive = v, exhausted);
                 if (layer.AffectsEmissive)
                 {
                     var emColor = layer.EmissiveColor;
                     if (ImGui.ColorEdit3("##emColor", ref emColor, ImGuiColorEditFlags.NoInputs | ImGuiColorEditFlags.NoLabel))
                     { layer.EmissiveColor = emColor; MarkPreviewDirty(); TryDirectEmissiveUpdate(group, layer); }
-                    ImGui.SameLine();
-                    ImGui.Text("发光颜色");
-
-                    ImGui.AlignTextToFramePadding(); ImGui.Text("强度"); ImGui.SameLine(labelW2);
-                    ImGui.SetNextItemWidth(-1);
-                    var emIntensity = layer.EmissiveIntensity;
-                    if (ImGui.DragFloat("##emIntensity", ref emIntensity, 0.05f, 0.1f, 10f, "%.2f"))
-                    { layer.EmissiveIntensity = emIntensity; MarkPreviewDirty(); TryDirectEmissiveUpdate(group, layer); }
-                    if (ScrollAdjust(ref emIntensity, 0.1f, 0.1f, 10f))
-                    { layer.EmissiveIntensity = emIntensity; MarkPreviewDirty(); TryDirectEmissiveUpdate(group, layer); }
-                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("发光强度");
-
-                    ImGui.AlignTextToFramePadding(); ImGui.Text("遮罩"); ImGui.SameLine(labelW2);
-                    ImGui.SetNextItemWidth(-1);
-                    var maskIdx = (int)layer.EmissiveMask;
-                    if (ImGui.Combo("##emMask", ref maskIdx, EmissiveMaskNames, EmissiveMaskNames.Length))
-                    { layer.EmissiveMask = (EmissiveMask)maskIdx; MarkPreviewDirty(); }
-                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("发光遮罩模式");
-
-                    if (layer.EmissiveMask != EmissiveMask.Uniform)
-                    {
-                        ImGui.AlignTextToFramePadding(); ImGui.Text("羽化"); ImGui.SameLine(labelW2);
-                        ImGui.SetNextItemWidth(-1);
-                        var falloff = layer.EmissiveMaskFalloff;
-                        if (ImGui.DragFloat("##emFalloff", ref falloff, 0.01f, 0.01f, 1f, "%.2f"))
-                        { layer.EmissiveMaskFalloff = falloff; MarkPreviewDirty(); }
-                        if (ScrollAdjust(ref falloff, 0.05f, 0.01f, 1f))
-                        { layer.EmissiveMaskFalloff = falloff; MarkPreviewDirty(); }
-                        if (ImGui.IsItemHovered()) ImGui.SetTooltip("羽化程度 (0=锐利, 1=柔和)");
-                    }
-
-                    if (layer.EmissiveMask == EmissiveMask.DirectionalGradient)
-                    {
-                        ImGui.AlignTextToFramePadding(); ImGui.Text("角度"); ImGui.SameLine(labelW2);
-                        ImGui.SetNextItemWidth(-1);
-                        var gAngle = layer.GradientAngleDeg;
-                        if (ImGui.DragFloat("##gradAngle", ref gAngle, 1f, -180f, 180f, "%.1f°"))
-                        { layer.GradientAngleDeg = gAngle; MarkPreviewDirty(); }
-                        if (ScrollAdjust(ref gAngle, 1f, -180f, 180f))
-                        { layer.GradientAngleDeg = gAngle; MarkPreviewDirty(); }
-                        if (ImGui.IsItemHovered()) ImGui.SetTooltip("渐变方向角度");
-
-                        ImGui.AlignTextToFramePadding(); ImGui.Text("范围"); ImGui.SameLine(labelW2);
-                        ImGui.SetNextItemWidth(-1);
-                        var gScale = layer.GradientScale;
-                        if (ImGui.DragFloat("##gradScale", ref gScale, 0.01f, 0.1f, 2f, "%.2f"))
-                        { layer.GradientScale = gScale; MarkPreviewDirty(); }
-                        if (ScrollAdjust(ref gScale, 0.05f, 0.1f, 2f))
-                        { layer.GradientScale = gScale; MarkPreviewDirty(); }
-                        if (ImGui.IsItemHovered()) ImGui.SetTooltip("渐变扩散范围");
-
-                        ImGui.AlignTextToFramePadding(); ImGui.Text("偏移"); ImGui.SameLine(labelW2);
-                        ImGui.SetNextItemWidth(-1);
-                        var gOff = layer.GradientOffset;
-                        if (ImGui.DragFloat("##gradOffset", ref gOff, 0.01f, -1f, 1f, "%.2f"))
-                        { layer.GradientOffset = gOff; MarkPreviewDirty(); }
-                        if (ScrollAdjust(ref gOff, 0.02f, -1f, 1f))
-                        { layer.GradientOffset = gOff; MarkPreviewDirty(); }
-                        if (ImGui.IsItemHovered()) ImGui.SetTooltip("渐变起始偏移");
-                    }
-
-                    // Emissive mask preview
-                    DrawEmissiveMaskPreview(layer.EmissiveMask, layer.EmissiveMaskFalloff, layer);
-
-                    if (string.IsNullOrEmpty(group.MtrlGamePath))
-                        ImGui.TextColored(new Vector4(1, 0.5f, 0.3f, 1), "需要选择材质(.mtrl)");
+                    ImGui.SameLine(); ImGui.Text("强度");
+                    ImGui.SetNextItemWidth(80);
+                    var emI = layer.EmissiveIntensity;
+                    if (ImGui.DragFloat("##emI", ref emI, 0.05f, 0.1f, 10f, "%.2f"))
+                    { layer.EmissiveIntensity = emI; MarkPreviewDirty(); TryDirectEmissiveUpdate(group, layer); }
                 }
+
+                DrawPbrCheckbox(group, layer, "粗糙度",
+                    () => layer.AffectsRoughness, v => layer.AffectsRoughness = v, exhausted);
+                if (layer.AffectsRoughness)
+                {
+                    var r = layer.Roughness;
+                    if (ImGui.SliderFloat("##rough", ref r, 0f, 1f, "%.2f"))
+                    { layer.Roughness = r; MarkPreviewDirty(); }
+                }
+
+                DrawPbrCheckbox(group, layer, "金属度",
+                    () => layer.AffectsMetalness, v => layer.AffectsMetalness = v, exhausted);
+                if (layer.AffectsMetalness)
+                {
+                    var mt = layer.Metalness;
+                    if (ImGui.SliderFloat("##metal", ref mt, 0f, 1f, "%.2f"))
+                    { layer.Metalness = mt; MarkPreviewDirty(); }
+                }
+
+                DrawPbrCheckbox(group, layer, "光泽",
+                    () => layer.AffectsSheen, v => layer.AffectsSheen = v, exhausted);
+                if (layer.AffectsSheen)
+                {
+                    var sr = layer.SheenRate;
+                    if (ImGui.SliderFloat("Rate##sheenRate", ref sr, 0f, 1f, "%.2f"))
+                    { layer.SheenRate = sr; MarkPreviewDirty(); }
+                    var st = layer.SheenTint;
+                    if (ImGui.SliderFloat("Tint##sheenTint", ref st, 0f, 1f, "%.2f"))
+                    { layer.SheenTint = st; MarkPreviewDirty(); }
+                    var sa = layer.SheenAperture;
+                    if (ImGui.SliderFloat("Apt##sheenAp", ref sa, 0f, 20f, "%.2f"))
+                    { layer.SheenAperture = sa; MarkPreviewDirty(); }
+                }
+
+                // Layer fade mask (all PBR fields fade together now per v1 spec)
+                ImGui.Separator();
+                ImGui.TextDisabled("图层羽化（影响所有 PBR 字段）");
+                var maskIdx = (int)layer.FadeMask;
+                if (ImGui.Combo("##fadeMask", ref maskIdx, LayerFadeMaskNames, LayerFadeMaskNames.Length))
+                { layer.FadeMask = (LayerFadeMask)maskIdx; MarkPreviewDirty(); }
+                if (layer.FadeMask != LayerFadeMask.Uniform)
+                {
+                    var f = layer.FadeMaskFalloff;
+                    if (ImGui.SliderFloat("羽化##fadeFalloff", ref f, 0.01f, 1f, "%.2f"))
+                    { layer.FadeMaskFalloff = f; MarkPreviewDirty(); }
+                }
+                if (layer.FadeMask == LayerFadeMask.DirectionalGradient)
+                {
+                    var a = layer.GradientAngleDeg;
+                    if (ImGui.SliderFloat("角度##gAng", ref a, -180f, 180f, "%.1f°"))
+                    { layer.GradientAngleDeg = a; MarkPreviewDirty(); }
+                    var gs = layer.GradientScale;
+                    if (ImGui.SliderFloat("范围##gScl", ref gs, 0.1f, 2f, "%.2f"))
+                    { layer.GradientScale = gs; MarkPreviewDirty(); }
+                    var go = layer.GradientOffset;
+                    if (ImGui.SliderFloat("偏移##gOff", ref go, -1f, 1f, "%.2f"))
+                    { layer.GradientOffset = go; MarkPreviewDirty(); }
+                }
+
+                if (string.IsNullOrEmpty(group.MtrlGamePath))
+                    ImGui.TextColored(new Vector4(1, 0.5f, 0.3f, 1), "需要选择材质(.mtrl)");
             }
         }
 
@@ -1327,7 +1401,7 @@ public class MainWindow : Window, IDisposable
         DrawActionsSection();
     }
 
-    private void DrawEmissiveMaskPreview(EmissiveMask mask, float falloff, DecalLayer layer)
+    private void DrawFadeMaskPreview(LayerFadeMask mask, float falloff, DecalLayer layer)
     {
         ImGui.TextDisabled("遮罩预览:");
         var previewSize = 100f;
@@ -1344,10 +1418,10 @@ public class MainWindow : Window, IDisposable
                 float ru = (x + 0.5f) / cellCount - 0.5f;
                 float rv = (y + 0.5f) / cellCount - 0.5f;
                 float val;
-                if (mask == EmissiveMask.DirectionalGradient)
+                if (mask == LayerFadeMask.DirectionalGradient)
                     val = PreviewService.ComputeDirectionalGradient(ru, rv, 1f,
                         layer.GradientAngleDeg, layer.GradientScale, falloff, layer.GradientOffset);
-                else if (mask == EmissiveMask.ShapeOutline)
+                else if (mask == LayerFadeMask.ShapeOutline)
                 {
                     // Approximate shape outline in preview: use distance to center circle as alpha proxy
                     float fakeDa = (MathF.Abs(ru) < 0.3f && MathF.Abs(rv) < 0.3f) ? 1f : 0f;
@@ -1356,7 +1430,7 @@ public class MainWindow : Window, IDisposable
                     val = PreviewService.ComputeShapeOutline(fakeDa, falloff, fakeNeighbor);
                 }
                 else
-                    val = PreviewService.ComputeEmissiveMask(mask, falloff, ru, rv, 1f);
+                    val = PreviewService.ComputeFadeMaskWeight(mask, falloff, ru, rv, 1f);
 
                 var color = ImGui.GetColorU32(new Vector4(val, val, val, 1f));
                 var p0 = pos + new Vector2(x * cellSize, y * cellSize);
@@ -1378,10 +1452,10 @@ public class MainWindow : Window, IDisposable
                 float ru = (x + 0.5f) / cellCount - 0.5f;
                 float rv = (y + 0.5f) / cellCount - 0.5f;
                 float val;
-                if (mask == EmissiveMask.DirectionalGradient)
+                if (mask == LayerFadeMask.DirectionalGradient)
                     val = PreviewService.ComputeDirectionalGradient(ru, rv, 1f,
                         layer.GradientAngleDeg, layer.GradientScale, falloff, layer.GradientOffset);
-                else if (mask == EmissiveMask.ShapeOutline)
+                else if (mask == LayerFadeMask.ShapeOutline)
                 {
                     // Approximate shape outline in preview: use distance to center circle as alpha proxy
                     float fakeDa = (MathF.Abs(ru) < 0.3f && MathF.Abs(rv) < 0.3f) ? 1f : 0f;
@@ -1390,7 +1464,7 @@ public class MainWindow : Window, IDisposable
                     val = PreviewService.ComputeShapeOutline(fakeDa, falloff, fakeNeighbor);
                 }
                 else
-                    val = PreviewService.ComputeEmissiveMask(mask, falloff, ru, rv, 1f);
+                    val = PreviewService.ComputeFadeMaskWeight(mask, falloff, ru, rv, 1f);
 
                 var cr = Math.Min(emColor.X * val, 1f);
                 var cg = Math.Min(emColor.Y * val, 1f);
@@ -2016,11 +2090,52 @@ public class MainWindow : Window, IDisposable
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Draw a PBR-field checkbox. Toggling it on triggers row pair allocation;
+    /// on exhaustion, shows a toast and reverts the toggle to false.
+    /// Toggling off triggers release-if-unused.
+    /// </summary>
+    private void DrawPbrCheckbox(TargetGroup group, DecalLayer layer, string label,
+        Func<bool> get, Action<bool> set, bool exhausted)
+    {
+        var was = get();
+        var v = was;
+        var disabled = exhausted && !was;
+        if (disabled) ImGui.BeginDisabled();
+        if (ImGui.Checkbox(label, ref v))
+        {
+            if (v && !was)
+            {
+                bool needsAlloc = layer.AllocatedRowPair < 0;
+                set(true);
+                if (needsAlloc && !previewService.TryAllocateRowPairForLayer(group, layer))
+                {
+                    set(false);
+                    rowPairToast = $"无法启用 {label}：该材质 PBR 行号已满。请关闭其他图层的 PBR 字段后再试。";
+                    rowPairToastUntil = DateTime.UtcNow.AddSeconds(4);
+                }
+                else
+                {
+                    MarkPreviewDirty();
+                }
+            }
+            else if (!v && was)
+            {
+                set(false);
+                previewService.ReleaseRowPairIfUnused(group, layer);
+                MarkPreviewDirty();
+            }
+        }
+        if (disabled) ImGui.EndDisabled();
+    }
+
     private void ResetSelectedLayer()
     {
         var layer = project.SelectedLayer;
         if (layer == null) return;
+        var savedKind = layer.Kind;
         var d = new DecalLayer();
+        layer.Kind = savedKind;   // preserve layer type
         layer.UvCenter = d.UvCenter;
         layer.UvScale = d.UvScale;
         layer.RotationDeg = d.RotationDeg;
@@ -2029,11 +2144,22 @@ public class MainWindow : Window, IDisposable
         layer.Clip = d.Clip;
         layer.IsVisible = d.IsVisible;
         layer.AffectsDiffuse = d.AffectsDiffuse;
+        layer.AffectsSpecular = d.AffectsSpecular;
         layer.AffectsEmissive = d.AffectsEmissive;
+        layer.AffectsRoughness = d.AffectsRoughness;
+        layer.AffectsMetalness = d.AffectsMetalness;
+        layer.AffectsSheen = d.AffectsSheen;
+        layer.DiffuseColor = d.DiffuseColor;
+        layer.SpecularColor = d.SpecularColor;
         layer.EmissiveColor = d.EmissiveColor;
         layer.EmissiveIntensity = d.EmissiveIntensity;
-        layer.EmissiveMask = d.EmissiveMask;
-        layer.EmissiveMaskFalloff = d.EmissiveMaskFalloff;
+        layer.Roughness = d.Roughness;
+        layer.Metalness = d.Metalness;
+        layer.SheenRate = d.SheenRate;
+        layer.SheenTint = d.SheenTint;
+        layer.SheenAperture = d.SheenAperture;
+        layer.FadeMask = d.FadeMask;
+        layer.FadeMaskFalloff = d.FadeMaskFalloff;
         layer.GradientAngleDeg = d.GradientAngleDeg;
         layer.GradientScale = d.GradientScale;
         layer.GradientOffset = d.GradientOffset;

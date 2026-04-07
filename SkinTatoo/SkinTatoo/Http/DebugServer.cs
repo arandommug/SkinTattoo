@@ -260,6 +260,14 @@ internal sealed class ApiController : WebApiController
         lastUpdateMode   = _preview.LastUpdateMode,
     };
 
+    [Route(HttpVerbs.Get, "/debug/pbr")]
+    public object GetPbrDebug() => new
+    {
+        canSwapInPlace = _preview.CanSwapInPlace,
+        lastUpdateMode = _preview.LastUpdateMode,
+        groups         = _preview.GetPbrDiagnostics(_project),
+    };
+
     [Route(HttpVerbs.Get, "/textures")]
     public object GetTextures()
     {
@@ -491,6 +499,7 @@ internal sealed class ApiController : WebApiController
 
     private static object SerializeLayer(DecalLayer l) => new
     {
+        kind                    = l.Kind.ToString(),
         name                    = l.Name,
         imagePath               = l.ImagePath,
         uvCenter                = new { x = l.UvCenter.X, y = l.UvCenter.Y },
@@ -498,13 +507,36 @@ internal sealed class ApiController : WebApiController
         rotationDeg             = l.RotationDeg,
         opacity                 = l.Opacity,
         blendMode               = l.BlendMode.ToString(),
+        clip                    = l.Clip.ToString(),
         isVisible               = l.IsVisible,
+        allocatedRowPair        = l.AllocatedRowPair,
+
         affectsDiffuse          = l.AffectsDiffuse,
+        affectsSpecular         = l.AffectsSpecular,
         affectsEmissive         = l.AffectsEmissive,
+        affectsRoughness        = l.AffectsRoughness,
+        affectsMetalness        = l.AffectsMetalness,
+        affectsSheen            = l.AffectsSheen,
+
+        diffuseColor            = new { r = l.DiffuseColor.X, g = l.DiffuseColor.Y, b = l.DiffuseColor.Z },
+        specularColor           = new { r = l.SpecularColor.X, g = l.SpecularColor.Y, b = l.SpecularColor.Z },
         emissiveColor           = new { r = l.EmissiveColor.X, g = l.EmissiveColor.Y, b = l.EmissiveColor.Z },
         emissiveIntensity       = l.EmissiveIntensity,
-        emissiveMask            = l.EmissiveMask.ToString(),
-        emissiveMaskFalloff     = l.EmissiveMaskFalloff,
+        roughness               = l.Roughness,
+        metalness               = l.Metalness,
+        sheenRate               = l.SheenRate,
+        sheenTint               = l.SheenTint,
+        sheenAperture           = l.SheenAperture,
+
+        fadeMask                = l.FadeMask.ToString(),
+        fadeMaskFalloff         = l.FadeMaskFalloff,
+        gradientAngleDeg        = l.GradientAngleDeg,
+        gradientScale           = l.GradientScale,
+        gradientOffset          = l.GradientOffset,
+
+        // Legacy aliases (deprecated, kept for compat with v0 clients)
+        emissiveMask            = l.FadeMask.ToString(),
+        emissiveMaskFalloff     = l.FadeMaskFalloff,
     };
 
     private static void ApplyPartialUpdate(DecalLayer layer, string json)
@@ -561,6 +593,78 @@ internal sealed class ApiController : WebApiController
                 layer.EmissiveColor = new Vector3(r, g, b);
             }
         }
+
+        // v1 PBR field mappings
+        if (root.TryGetProperty("kind", out v) && v.ValueKind == JsonValueKind.String)
+        {
+            if (Enum.TryParse<LayerKind>(v.GetString(), ignoreCase: true, out var k))
+                layer.Kind = k;
+        }
+
+        if (root.TryGetProperty("clip", out v) && v.ValueKind == JsonValueKind.String)
+        {
+            if (Enum.TryParse<ClipMode>(v.GetString(), ignoreCase: true, out var cm))
+                layer.Clip = cm;
+        }
+
+        if (root.TryGetProperty("affectsSpecular", out v) && v.ValueKind is JsonValueKind.True or JsonValueKind.False)
+            layer.AffectsSpecular = v.GetBoolean();
+        if (root.TryGetProperty("affectsRoughness", out v) && v.ValueKind is JsonValueKind.True or JsonValueKind.False)
+            layer.AffectsRoughness = v.GetBoolean();
+        if (root.TryGetProperty("affectsMetalness", out v) && v.ValueKind is JsonValueKind.True or JsonValueKind.False)
+            layer.AffectsMetalness = v.GetBoolean();
+        if (root.TryGetProperty("affectsSheen", out v) && v.ValueKind is JsonValueKind.True or JsonValueKind.False)
+            layer.AffectsSheen = v.GetBoolean();
+
+        if (root.TryGetProperty("diffuseColor", out v) && v.ValueKind == JsonValueKind.Object)
+        {
+            float r = v.TryGetProperty("r", out var vr) ? vr.GetSingle() : layer.DiffuseColor.X;
+            float g = v.TryGetProperty("g", out var vg) ? vg.GetSingle() : layer.DiffuseColor.Y;
+            float b = v.TryGetProperty("b", out var vb) ? vb.GetSingle() : layer.DiffuseColor.Z;
+            layer.DiffuseColor = new Vector3(r, g, b);
+        }
+        if (root.TryGetProperty("specularColor", out v) && v.ValueKind == JsonValueKind.Object)
+        {
+            float r = v.TryGetProperty("r", out var vr) ? vr.GetSingle() : layer.SpecularColor.X;
+            float g = v.TryGetProperty("g", out var vg) ? vg.GetSingle() : layer.SpecularColor.Y;
+            float b = v.TryGetProperty("b", out var vb) ? vb.GetSingle() : layer.SpecularColor.Z;
+            layer.SpecularColor = new Vector3(r, g, b);
+        }
+
+        if (root.TryGetProperty("roughness", out v) && v.ValueKind == JsonValueKind.Number)
+            layer.Roughness = v.GetSingle();
+        if (root.TryGetProperty("metalness", out v) && v.ValueKind == JsonValueKind.Number)
+            layer.Metalness = v.GetSingle();
+        if (root.TryGetProperty("sheenRate", out v) && v.ValueKind == JsonValueKind.Number)
+            layer.SheenRate = v.GetSingle();
+        if (root.TryGetProperty("sheenTint", out v) && v.ValueKind == JsonValueKind.Number)
+            layer.SheenTint = v.GetSingle();
+        if (root.TryGetProperty("sheenAperture", out v) && v.ValueKind == JsonValueKind.Number)
+            layer.SheenAperture = v.GetSingle();
+
+        // fadeMask (new) + legacy emissiveMask alias
+        if (root.TryGetProperty("fadeMask", out v) && v.ValueKind == JsonValueKind.String)
+        {
+            if (Enum.TryParse<LayerFadeMask>(v.GetString(), ignoreCase: true, out var fm))
+                layer.FadeMask = fm;
+        }
+        else if (root.TryGetProperty("emissiveMask", out v) && v.ValueKind == JsonValueKind.String)
+        {
+            if (Enum.TryParse<LayerFadeMask>(v.GetString(), ignoreCase: true, out var fm))
+                layer.FadeMask = fm;
+        }
+
+        if (root.TryGetProperty("fadeMaskFalloff", out v) && v.ValueKind == JsonValueKind.Number)
+            layer.FadeMaskFalloff = v.GetSingle();
+        else if (root.TryGetProperty("emissiveMaskFalloff", out v) && v.ValueKind == JsonValueKind.Number)
+            layer.FadeMaskFalloff = v.GetSingle();
+
+        if (root.TryGetProperty("gradientAngleDeg", out v) && v.ValueKind == JsonValueKind.Number)
+            layer.GradientAngleDeg = v.GetSingle();
+        if (root.TryGetProperty("gradientScale", out v) && v.ValueKind == JsonValueKind.Number)
+            layer.GradientScale = v.GetSingle();
+        if (root.TryGetProperty("gradientOffset", out v) && v.ValueKind == JsonValueKind.Number)
+            layer.GradientOffset = v.GetSingle();
     }
 
     private static Vector2 ReadVector2(JsonElement el, Vector2 fallback)

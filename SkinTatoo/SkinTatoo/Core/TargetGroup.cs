@@ -56,9 +56,9 @@ public class TargetGroup
         SelectedLayerIndex >= 0 && SelectedLayerIndex < Layers.Count
             ? Layers[SelectedLayerIndex] : null;
 
-    public DecalLayer AddLayer(string name = "New Decal")
+    public DecalLayer AddLayer(string name = "New Decal", LayerKind kind = LayerKind.Decal)
     {
-        var layer = new DecalLayer { Name = name };
+        var layer = new DecalLayer { Name = name, Kind = kind };
         Layers.Add(layer);
         SelectedLayerIndex = Layers.Count - 1;
         return layer;
@@ -92,6 +92,14 @@ public class TargetGroup
     {
         foreach (var l in Layers)
             if (l.IsVisible && l.AffectsEmissive && !string.IsNullOrEmpty(l.ImagePath))
+                return true;
+        return false;
+    }
+
+    public bool HasPbrLayers()
+    {
+        foreach (var l in Layers)
+            if (l.IsVisible && l.RequiresRowPair && !string.IsNullOrEmpty(l.ImagePath))
                 return true;
         return false;
     }

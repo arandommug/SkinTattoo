@@ -122,8 +122,6 @@ public unsafe class TextureSwapService
                         || normFile.EndsWith(normGame)
                         || normGame.EndsWith(normFile))
                     {
-                        DebugServer.AppendLog(
-                            $"[TextureSwap] Found at Model[{s}]Mat[{m}]Tex[{t}]: {fileName}");
                         return &texHandle->Texture;
                     }
 
@@ -135,8 +133,6 @@ public unsafe class TextureSwapService
                             || normFileBack.EndsWith(normDisk)
                             || normDisk.EndsWith(normFileBack))
                         {
-                            DebugServer.AppendLog(
-                                $"[TextureSwap] Found at Model[{s}]Mat[{m}]Tex[{t}]: {fileName}");
                             return &texHandle->Texture;
                         }
                     }
@@ -144,7 +140,6 @@ public unsafe class TextureSwapService
             }
         }
 
-        DebugServer.AppendLog($"[TextureSwap] NOT FOUND game={gamePath} disk={diskPath}");
         return null;
     }
 
@@ -192,10 +187,172 @@ public unsafe class TextureSwapService
         var oldPtr = Interlocked.Exchange(ref *(nint*)slot, (nint)newTex);
         if (oldPtr != 0)
             ((GpuTexture*)oldPtr)->DecRef();
-
-        DebugServer.AppendLog(
-            $"[TextureSwap] OK {width}x{height} old=0x{oldPtr:X} new=0x{(nint)newTex:X}");
         return true;
+    }
+
+    /// <summary>
+    /// Copy the vanilla ColorTable bytes from a matched material's MaterialResourceHandle.
+    /// Returns Half[] of length ctWidth*ctHeight*4, plus dimensions.
+    /// Used by v1 PBR path to get a mutable baseline before writing back a full table.
+    /// Returns false if no matching material or HasColorTable=false.
+    /// </summary>
+    public bool TryGetVanillaColorTable(CharacterBase* charBase, string mtrlGamePath,
+        string? mtrlDiskPath, out Half[] data, out int width, out int height)
+    {
+        data = Array.Empty<Half>();
+        width = 0;
+        height = 0;
+
+        if (!CanRead(charBase, 0x360)) return false;
+
+        var slotCount = charBase->SlotCount;
+        if (slotCount <= 0 || slotCount > 30) return false;
+
+        var modelsPtr = charBase->Models;
+        if (!CanRead(modelsPtr, slotCount * sizeof(nint))) return false;
+
+        var normMtrl = mtrlGamePath.Replace('\\', '/').ToLowerInvariant();
+        var normDisk = mtrlDiskPath?.Replace('\\', '/').ToLowerInvariant();
+
+        for (int s = 0; s < slotCount; s++)
+        {
+            var model = modelsPtr[s];
+            if (!CanRead(model, 0xA8)) continue;
+            var matCount = model->MaterialCount;
+            if (matCount <= 0 || matCount > 20) continue;
+            var mats = model->Materials;
+            if (!CanRead(mats, matCount * sizeof(nint))) continue;
+
+            for (int m = 0; m < matCount; m++)
+            {
+                var mat = mats[m];
+                if (!CanRead(mat, 0x58)) continue;
+                var mtrlHandle = mat->MaterialResourceHandle;
+                if (!CanRead(mtrlHandle, 0x100)) continue;
+
+                string mtrlFileName;
+                try { mtrlFileName = ((ResourceHandle*)mtrlHandle)->FileName.ToString(); }
+                catch { continue; }
+                if (string.IsNullOrEmpty(mtrlFileName)) continue;
+
+                var normFileName = mtrlFileName.Replace('\\', '/').ToLowerInvariant();
+                bool matched = normFileName.EndsWith(normMtrl) || normMtrl.EndsWith(normFileName);
+                if (!matched && normDisk != null)
+                    matched = normFileName.EndsWith(normDisk) || normDisk.EndsWith(normFileName)
+                           || normFileName.Contains(Path.GetFileName(normDisk));
+                if (!matched) continue;
+
+                if (!mtrlHandle->HasColorTable) return false;
+                var ctData = mtrlHandle->ColorTable;
+                if (ctData == null) return false;
+
+                var ctW = mtrlHandle->ColorTableWidth;
+                var ctH = mtrlHandle->ColorTableHeight;
+                if (ctW <= 0 || ctH <= 0) return false;
+
+                int halfCount = ctW * ctH * 4;
+                var copy = new Half[halfCount];
+                fixed (Half* dst = copy)
+                {
+                    Buffer.MemoryCopy(ctData, dst, halfCount * sizeof(Half), halfCount * sizeof(Half));
+                }
+                data = copy;
+                width = ctW;
+                height = ctH;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Replace a matched material's ColorTable GPU texture with a new full table.
+    /// Input: Half[] of length width*height*4, where width = vec4 count per row (= texture width),
+    /// height = row count. Performs an atomic slot swap via Interlocked.Exchange.
+    /// Modeled after Glamourer's DirectXService.ReplaceColorTable.
+    /// </summary>
+    public bool ReplaceColorTableRaw(CharacterBase* charBase, string mtrlGamePath,
+        string? mtrlDiskPath, Half[] data, int width, int height)
+    {
+        if (!CanRead(charBase, 0x360)) return false;
+        if (data.Length != width * height * 4) return false;
+
+        var slotCount = charBase->SlotCount;
+        if (slotCount <= 0 || slotCount > 30) return false;
+        var modelsPtr = charBase->Models;
+        if (!CanRead(modelsPtr, slotCount * sizeof(nint))) return false;
+        var ctTextures = charBase->ColorTableTextures;
+        if (!CanRead(ctTextures, slotCount * CharacterBase.MaterialsPerSlot * sizeof(nint))) return false;
+
+        var normMtrl = mtrlGamePath.Replace('\\', '/').ToLowerInvariant();
+        var normDisk = mtrlDiskPath?.Replace('\\', '/').ToLowerInvariant();
+
+        for (int s = 0; s < slotCount; s++)
+        {
+            var model = modelsPtr[s];
+            if (!CanRead(model, 0xA8)) continue;
+            var matCount = model->MaterialCount;
+            if (matCount <= 0 || matCount > 20) continue;
+            var mats = model->Materials;
+            if (!CanRead(mats, matCount * sizeof(nint))) continue;
+
+            for (int m = 0; m < matCount; m++)
+            {
+                var mat = mats[m];
+                if (!CanRead(mat, 0x58)) continue;
+                var mtrlHandle = mat->MaterialResourceHandle;
+                if (!CanRead(mtrlHandle, 0x100)) continue;
+
+                string mtrlFileName;
+                try { mtrlFileName = ((ResourceHandle*)mtrlHandle)->FileName.ToString(); }
+                catch { continue; }
+                if (string.IsNullOrEmpty(mtrlFileName)) continue;
+
+                var normFileName = mtrlFileName.Replace('\\', '/').ToLowerInvariant();
+                bool matched = normFileName.EndsWith(normMtrl) || normMtrl.EndsWith(normFileName);
+                if (!matched && normDisk != null)
+                    matched = normFileName.EndsWith(normDisk) || normDisk.EndsWith(normFileName)
+                           || normFileName.Contains(Path.GetFileName(normDisk));
+                if (!matched) continue;
+
+                if (!mtrlHandle->HasColorTable) continue;
+
+                int flatIndex = s * CharacterBase.MaterialsPerSlot + m;
+                var texSlot = &ctTextures[flatIndex];
+                if (*texSlot == null)
+                {
+                    DebugServer.AppendLog($"[TextureSwap] ReplaceColorTableRaw: slot null Model[{s}]Mat[{m}]");
+                    return false;
+                }
+
+                var newTex = GpuTexture.CreateTexture2D(
+                    width, height, 1,
+                    TexFormat.R16G16B16A16_FLOAT,
+                    CreateFlags, 7);
+                if (newTex == null)
+                {
+                    DebugServer.AppendLog("[TextureSwap] ReplaceColorTableRaw: CreateTexture2D failed");
+                    return false;
+                }
+
+                fixed (Half* dataPtr = data)
+                {
+                    if (!newTex->InitializeContents(dataPtr))
+                    {
+                        newTex->DecRef();
+                        DebugServer.AppendLog("[TextureSwap] ReplaceColorTableRaw: InitializeContents failed");
+                        return false;
+                    }
+                }
+
+                var oldPtr = Interlocked.Exchange(ref *(nint*)texSlot, (nint)newTex);
+                if (oldPtr != 0)
+                    ((GpuTexture*)oldPtr)->DecRef();
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -325,11 +482,6 @@ public unsafe class TextureSwapService
                 var oldPtr = Interlocked.Exchange(ref *(nint*)texSlot, (nint)newTex);
                 if (oldPtr != 0)
                     ((GpuTexture*)oldPtr)->DecRef();
-
-                DebugServer.AppendLog(
-                    $"[TextureSwap] Emissive ColorTable swap Model[{s}]Mat[{m}] " +
-                    $"color=({color.X:F2},{color.Y:F2},{color.Z:F2}) " +
-                    $"ct={ctWidth}x{ctHeight} old=0x{oldPtr:X} new=0x{(nint)newTex:X}");
 
                 return true;
             }

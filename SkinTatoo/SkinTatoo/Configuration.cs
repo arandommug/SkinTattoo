@@ -32,6 +32,30 @@ public class SavedLayer
     public float GradientScale { get; set; } = 1f;
     public float GradientOffset { get; set; }
     public int Clip { get; set; }
+
+    // v1 PBR: layer kind
+    public int Kind { get; set; } = 0;   // 0 = Decal, 1 = WholeMaterial
+
+    // Field-level affect switches
+    public bool AffectsSpecular { get; set; }
+    public bool AffectsRoughness { get; set; }
+    public bool AffectsMetalness { get; set; }
+    public bool AffectsSheen { get; set; }
+
+    // PBR field values
+    public float DiffuseColorR { get; set; } = 1f;
+    public float DiffuseColorG { get; set; } = 1f;
+    public float DiffuseColorB { get; set; } = 1f;
+
+    public float SpecularColorR { get; set; } = 1f;
+    public float SpecularColorG { get; set; } = 1f;
+    public float SpecularColorB { get; set; } = 1f;
+
+    public float Roughness { get; set; } = 0.5f;
+    public float Metalness { get; set; } = 0f;
+    public float SheenRate { get; set; } = 0.1f;
+    public float SheenTint { get; set; } = 0.2f;
+    public float SheenAperture { get; set; } = 5.0f;
 }
 
 [Serializable]
@@ -56,7 +80,7 @@ public class SavedTargetGroup
 [Serializable]
 public class Configuration : IPluginConfiguration
 {
-    public int Version { get; set; } = 3;
+    public int Version { get; set; } = 4;
     public int HttpPort { get; set; } = 14780;
     public int TextureResolution { get; set; } = 1024;
 
@@ -75,9 +99,25 @@ public class Configuration : IPluginConfiguration
     public string DefaultVersion { get; set; } = "1.0";
     public string? LastExportDir { get; set; }
 
+    // v1 PBR: if true, MainWindow shows a one-time dialog explaining the
+    // EmissiveMask → LayerFadeMask semantics change (widens to all PBR fields).
+    // Set to true on first load of any v3-saved project; cleared after user acks.
+    public bool ShowLayerFadeMaskMigrationNotice { get; set; } = false;
+
     [NonSerialized]
     private IDalamudPluginInterface? pluginInterface;
 
-    public void Initialize(IDalamudPluginInterface pi) => pluginInterface = pi;
+    public void Initialize(IDalamudPluginInterface pi)
+    {
+        pluginInterface = pi;
+
+        // v3 → v4: EmissiveMask semantics widened (now fades all PBR fields, not just emissive).
+        // Trigger a one-time notice dialog on next MainWindow draw.
+        if (Version < 4 && TargetGroups.Count > 0)
+        {
+            ShowLayerFadeMaskMigrationNotice = true;
+        }
+        Version = 4;
+    }
     public void Save() => pluginInterface?.SavePluginConfig(this);
 }

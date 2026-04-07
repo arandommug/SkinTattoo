@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
@@ -46,13 +47,32 @@ public class PreviewService : IDisposable
     private readonly ConcurrentDictionary<string, string> previewMtrlDiskPaths =
         new(StringComparer.OrdinalIgnoreCase);
 
+    // v1 PBR: per-TargetGroup row pair allocators (keyed by MtrlGamePath)
+    private readonly ConcurrentDictionary<string, RowPairAllocator> rowPairAllocators =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    // v1 PBR: index map game path resolved from each mtrl's sampler 0x565F8FD8.
+    // Keyed by MtrlGamePath. Cached after first resolution.
+    private readonly ConcurrentDictionary<string, string> indexMapGamePaths =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    // sampler ID for g_SamplerIndex per Penumbra ShpkFile.cs:17
+    private const uint IndexSamplerId = 0x565F8FD8u;
+
+    // Cached vanilla ColorTable bytes per material (keyed by MtrlGamePath).
+    // Populated on first ColorTable write from the main thread; background composite
+    // reads from here to avoid cross-thread GPU access.
+    private readonly ConcurrentDictionary<string, (Half[] Data, int Width, int Height)> vanillaColorTables =
+        new(StringComparer.OrdinalIgnoreCase);
+
     // Async compositing
     private CancellationTokenSource? asyncCancel;
     private volatile SwapBatch? pendingBatch;
 
     private record SwapBatchEntry(string GamePath, string? DiskPath, byte[] BgraData, int Width, int Height);
     private record EmissiveEntry(string MtrlGamePath, string? MtrlDiskPath, Vector3 Color, int CBufferOffset);
-    private record SwapBatch(List<SwapBatchEntry> Textures, List<EmissiveEntry> Emissives);
+    private record ColorTableEntry(string MtrlGamePath, string? MtrlDiskPath, Half[] Data, int Width, int Height);
+    private record SwapBatch(List<SwapBatchEntry> Textures, List<EmissiveEntry> Emissives, List<ColorTableEntry> ColorTables);
 
     public MeshData? CurrentMesh => currentMesh;
 
@@ -156,6 +176,7 @@ public class PreviewService : IDisposable
     /// <summary>Update preview — auto-selects full redraw or async in-place GPU swap.</summary>
     public void UpdatePreview(DecalProject project)
     {
+        activeProject = project;  // remember for opportunistic vanilla CT caching in ApplyPendingSwaps
         if (config.UseGpuSwap && textureSwap != null && CheckCanSwapInPlace(project))
         {
             StartAsyncInPlace(project);
@@ -166,9 +187,19 @@ public class PreviewService : IDisposable
         }
     }
 
+    // Sticky reference so ApplyPendingSwaps can attempt vanilla CT caching every frame
+    // (only fires when project changes are pending). Set by UpdatePreview*.
+    private DecalProject? activeProject;
+
     /// <summary>Call from Draw() every frame to apply completed async swaps.</summary>
     public unsafe void ApplyPendingSwaps()
     {
+        // Opportunistic vanilla CT cache attempt — runs every frame but is idempotent
+        // and only fires for materials not yet cached. Catches the case where Full Redraw
+        // happened in an earlier frame and the GPU is now ready to read.
+        if (activeProject != null)
+            TryCacheVanillaColorTables(activeProject);
+
         var batch = Interlocked.Exchange(ref pendingBatch, null);
         if (batch == null) return;
 
@@ -182,10 +213,15 @@ public class PreviewService : IDisposable
                 textureSwap.SwapTexture(slot, entry.BgraData, entry.Width, entry.Height);
         }
 
+        foreach (var ct in batch.ColorTables)
+        {
+            textureSwap!.ReplaceColorTableRaw(charBase, ct.MtrlGamePath, ct.MtrlDiskPath, ct.Data, ct.Width, ct.Height);
+        }
+
         foreach (var em in batch.Emissives)
         {
-            // Try ColorTable swap first (works for character.shpk etc.)
-            // ColorTable swap for character.shpk etc.; skin.shpk handled by EmissiveCBufferHook
+            // Legacy single-emissive path: only fires when no ColorTable entry was queued
+            // for this material (skin.shpk fallback or non-Dawntrail layouts).
             textureSwap!.UpdateEmissiveViaColorTable(charBase, em.MtrlGamePath, em.MtrlDiskPath, em.Color);
             if (emissiveHook != null && em.CBufferOffset > 0)
                 emissiveHook.SetTargetByPath(charBase, em.MtrlGamePath, em.MtrlDiskPath, em.Color);
@@ -335,16 +371,22 @@ public class PreviewService : IDisposable
     }
 
     /// <summary>Kick off background compositing, results applied via ApplyPendingSwaps.</summary>
-    private void StartAsyncInPlace(DecalProject project)
+    private unsafe void StartAsyncInPlace(DecalProject project)
     {
         // Cancel any previous background work
         asyncCancel?.Cancel();
         asyncCancel = new CancellationTokenSource();
         var token = asyncCancel.Token;
 
+        // v1 PBR: cache vanilla ColorTable from GPU before spawning the background task.
+        // Idempotent — only the FIRST successful cache per material counts. Vanilla normal
+        // scan is handled lazily inside TryAllocateRowPairForLayer (disk-only, no GPU needed).
+        TryCacheVanillaColorTables(project);
+
         // Capture all data needed by background thread (avoid touching mutable state later)
         var jobs = new List<(TargetGroup Group, string DiffuseGamePath, string? DiskPath,
             string? NormGamePath, string? NormDiskPath, string? MtrlGamePath, int EmissiveOffset,
+            string? IndexGamePath, string? IndexDiskPath,
             List<LayerSnapshot> Layers, Vector3 EmissiveColor)>();
 
         foreach (var group in project.Groups)
@@ -359,6 +401,12 @@ public class PreviewService : IDisposable
 
             emissiveOffsets.TryGetValue(group.MtrlGamePath ?? "", out var emOff);
 
+            // v1 PBR: resolve index map path (cached) and look up its staged disk path
+            var indexGame = GetIndexMapGamePath(group);
+            string? indexDisk = null;
+            if (!string.IsNullOrEmpty(indexGame))
+                previewDiskPaths.TryGetValue(indexGame, out indexDisk);
+
             // Snapshot layer parameters so background thread reads stable data
             var snapshots = new List<LayerSnapshot>();
             foreach (var l in group.Layers)
@@ -366,7 +414,9 @@ public class PreviewService : IDisposable
 
             jobs.Add((group, group.DiffuseGamePath, diffDisk,
                 group.NormGamePath, normDisk ?? (group.OrigNormDiskPath ?? group.NormDiskPath),
-                group.MtrlGamePath, emOff, snapshots,
+                group.MtrlGamePath, emOff,
+                indexGame, indexDisk,
+                snapshots,
                 GetCombinedEmissiveColor(group.Layers)));
         }
 
@@ -376,6 +426,7 @@ public class PreviewService : IDisposable
             {
                 var texEntries = new List<SwapBatchEntry>();
                 var emEntries = new List<EmissiveEntry>();
+                var ctEntries = new List<ColorTableEntry>();
 
                 foreach (var job in jobs)
                 {
@@ -386,11 +437,32 @@ public class PreviewService : IDisposable
 
                     // Diffuse composite
                     var baseTex = LoadBaseTexture(job.Group);
+
+                    // GPU diffuse — only paints layers with AffectsDiffuse=true
                     var rgba = CpuUvComposite(layers, baseTex.Data, baseTex.Width, baseTex.Height);
+
+                    // 3D editor preview diffuse — paints ALL visible layers with images so the
+                    // user sees decal placement even when AffectsDiffuse is off.
+                    bool hasPreviewOnly = false;
+                    foreach (var l in layers)
+                    {
+                        if (l.IsVisible && !string.IsNullOrEmpty(l.ImagePath) && !l.AffectsDiffuse)
+                        { hasPreviewOnly = true; break; }
+                    }
+                    var previewRgba = hasPreviewOnly
+                        ? CpuUvComposite(layers, baseTex.Data, baseTex.Width, baseTex.Height, ignoreAffectsDiffuseFilter: true)
+                        : rgba;
+
+                    // 3D editor consumes compositeResults — feed it the preview-with-all-layers version
+                    if (previewRgba != null)
+                    {
+                        compositeResults[job.DiffuseGamePath] = (previewRgba, baseTex.Width, baseTex.Height);
+                        Interlocked.Increment(ref compositeVersion);
+                    }
+
+                    // GPU/file path uses the filtered version
                     if (rgba != null)
                     {
-                        compositeResults[job.DiffuseGamePath] = (rgba, baseTex.Width, baseTex.Height);
-                        Interlocked.Increment(ref compositeVersion);
                         if (job.DiskPath != null)
                             WriteBgraTexFile(job.DiskPath, rgba, baseTex.Width, baseTex.Height);
                         var bgra = TextureSwapService.RgbaToBgra(rgba);
@@ -398,8 +470,52 @@ public class PreviewService : IDisposable
                             job.DiffuseGamePath, job.DiskPath, bgra, baseTex.Width, baseTex.Height));
                     }
 
-                    // Normal map (emissive mask)
-                    if (HasEmissiveLayers(job.Layers) && !string.IsNullOrEmpty(job.NormDiskPath))
+                    // v1 PBR: layers with allocated row pairs drive the index-map + ColorTable path
+                    var allocatedLayers = layers.Where(l => l.AllocatedRowPair >= 0 && l.IsVisible).ToList();
+                    bool hasPbrLayers = allocatedLayers.Count > 0;
+                    bool ctQueued = false;
+                    bool indexQueued = false;
+
+                    // Index map: rewrite R = rowPair*17, G = weight*255 (per Penumbra
+                    // MaterialExporter:136-137). Vanilla bytes are read from the staged
+                    // disk path that ProcessGroup populated, then cloned + modified.
+                    if (hasPbrLayers && !string.IsNullOrEmpty(job.IndexGamePath) && !string.IsNullOrEmpty(job.IndexDiskPath))
+                    {
+                        var idxRgba = CompositeIndexMap(allocatedLayers, job.IndexDiskPath!, baseTex.Width, baseTex.Height);
+                        if (idxRgba != null)
+                        {
+                            WriteBgraTexFile(job.IndexDiskPath!, idxRgba, baseTex.Width, baseTex.Height);
+                            var idxBgra = TextureSwapService.RgbaToBgra(idxRgba);
+                            texEntries.Add(new SwapBatchEntry(
+                                job.IndexGamePath!, job.IndexDiskPath, idxBgra, baseTex.Width, baseTex.Height));
+                            indexQueued = true;
+                        }
+                    }
+
+                    if (hasPbrLayers && !string.IsNullOrEmpty(job.MtrlGamePath)
+                        && vanillaColorTables.TryGetValue(job.MtrlGamePath!, out var vanilla)
+                        && ColorTableBuilder.IsDawntrailLayout(vanilla.Width, vanilla.Height))
+                    {
+                        var modified = ColorTableBuilder.Build(vanilla.Data, vanilla.Width, vanilla.Height, allocatedLayers);
+                        var mtrlDisk = previewMtrlDiskPaths.GetValueOrDefault(job.MtrlGamePath!);
+                        ctEntries.Add(new ColorTableEntry(
+                            job.MtrlGamePath!, mtrlDisk, modified, vanilla.Width, vanilla.Height));
+                        ctQueued = true;
+                    }
+
+                    // Per-cycle PBR diagnostic — one line per group, fires only when relevant
+                    if (hasPbrLayers)
+                    {
+                        bool vanillaCached = !string.IsNullOrEmpty(job.MtrlGamePath)
+                            && vanillaColorTables.ContainsKey(job.MtrlGamePath!);
+                        DebugServer.AppendLog(
+                            $"[PBR] Cycle {job.Group.Name}: alloc={allocatedLayers.Count} " +
+                            $"index={indexQueued} ct={ctQueued} vanillaCached={vanillaCached}");
+                    }
+
+                    // Legacy emissive fallback path: only fires when no ColorTable entry was queued
+                    // (skin.shpk-class materials, or non-Dawntrail layouts).
+                    if (!ctQueued && HasEmissiveLayers(job.Layers) && !string.IsNullOrEmpty(job.NormDiskPath))
                     {
                         var normRgba = CompositeEmissiveNorm(
                             layers, job.NormDiskPath!, baseTex.Width, baseTex.Height);
@@ -413,7 +529,6 @@ public class PreviewService : IDisposable
                                 job.NormGamePath!, normDiskOut, normBgra, baseTex.Width, baseTex.Height));
                         }
 
-                        // Emissive color → ColorTable texture swap or CBuffer write
                         if (!string.IsNullOrEmpty(job.MtrlGamePath))
                         {
                             var mtrlDisk = previewMtrlDiskPaths.GetValueOrDefault(job.MtrlGamePath!);
@@ -424,7 +539,7 @@ public class PreviewService : IDisposable
                 }
 
                 if (!token.IsCancellationRequested)
-                    pendingBatch = new SwapBatch(texEntries, emEntries);
+                    pendingBatch = new SwapBatch(texEntries, emEntries, ctEntries);
             }
             catch (Exception ex)
             {
@@ -436,42 +551,59 @@ public class PreviewService : IDisposable
     // Snapshot of layer parameters for thread-safe background compositing
     private class LayerSnapshot
     {
-        public bool IsVisible, AffectsDiffuse, AffectsEmissive;
+        public LayerKind Kind;
+        public string? Name;
+        public bool IsVisible;
+        public bool AffectsDiffuse, AffectsSpecular, AffectsEmissive, AffectsRoughness, AffectsMetalness, AffectsSheen;
         public string? ImagePath;
         public Vector2 UvCenter, UvScale;
         public float RotationDeg, Opacity;
         public BlendMode BlendMode;
         public ClipMode Clip;
-        public EmissiveMask EmissiveMask;
-        public float EmissiveMaskFalloff;
-        public Vector3 EmissiveColor;
+        public LayerFadeMask FadeMask;
+        public float FadeMaskFalloff;
+        public Vector3 DiffuseColor, SpecularColor, EmissiveColor;
         public float EmissiveIntensity;
+        public float Roughness, Metalness, SheenRate, SheenTint, SheenAperture;
         public float GradientAngleDeg;
         public float GradientScale;
         public float GradientOffset;
+        public int AllocatedRowPair;
 
         public LayerSnapshot(DecalLayer l)
         {
-            IsVisible = l.IsVisible; AffectsDiffuse = l.AffectsDiffuse; AffectsEmissive = l.AffectsEmissive;
+            Kind = l.Kind; Name = l.Name; IsVisible = l.IsVisible;
+            AffectsDiffuse = l.AffectsDiffuse; AffectsSpecular = l.AffectsSpecular; AffectsEmissive = l.AffectsEmissive;
+            AffectsRoughness = l.AffectsRoughness; AffectsMetalness = l.AffectsMetalness; AffectsSheen = l.AffectsSheen;
             ImagePath = l.ImagePath; UvCenter = l.UvCenter; UvScale = l.UvScale;
             RotationDeg = l.RotationDeg; Opacity = l.Opacity; BlendMode = l.BlendMode;
             Clip = l.Clip;
-            EmissiveMask = l.EmissiveMask; EmissiveMaskFalloff = l.EmissiveMaskFalloff;
+            FadeMask = l.FadeMask; FadeMaskFalloff = l.FadeMaskFalloff;
+            DiffuseColor = l.DiffuseColor; SpecularColor = l.SpecularColor;
             EmissiveColor = l.EmissiveColor; EmissiveIntensity = l.EmissiveIntensity;
+            Roughness = l.Roughness; Metalness = l.Metalness;
+            SheenRate = l.SheenRate; SheenTint = l.SheenTint; SheenAperture = l.SheenAperture;
             GradientAngleDeg = l.GradientAngleDeg; GradientScale = l.GradientScale;
             GradientOffset = l.GradientOffset;
+            AllocatedRowPair = l.AllocatedRowPair;
         }
 
         public DecalLayer ToDecalLayer() => new()
         {
-            IsVisible = IsVisible, AffectsDiffuse = AffectsDiffuse, AffectsEmissive = AffectsEmissive,
+            Kind = Kind, Name = Name ?? "", IsVisible = IsVisible,
+            AffectsDiffuse = AffectsDiffuse, AffectsSpecular = AffectsSpecular, AffectsEmissive = AffectsEmissive,
+            AffectsRoughness = AffectsRoughness, AffectsMetalness = AffectsMetalness, AffectsSheen = AffectsSheen,
             ImagePath = ImagePath, UvCenter = UvCenter, UvScale = UvScale,
             RotationDeg = RotationDeg, Opacity = Opacity, BlendMode = BlendMode,
             Clip = Clip,
-            EmissiveMask = EmissiveMask, EmissiveMaskFalloff = EmissiveMaskFalloff,
+            FadeMask = FadeMask, FadeMaskFalloff = FadeMaskFalloff,
+            DiffuseColor = DiffuseColor, SpecularColor = SpecularColor,
             EmissiveColor = EmissiveColor, EmissiveIntensity = EmissiveIntensity,
+            Roughness = Roughness, Metalness = Metalness,
+            SheenRate = SheenRate, SheenTint = SheenTint, SheenAperture = SheenAperture,
             GradientAngleDeg = GradientAngleDeg, GradientScale = GradientScale,
             GradientOffset = GradientOffset,
+            AllocatedRowPair = AllocatedRowPair,
         };
     }
 
@@ -481,6 +613,251 @@ public class PreviewService : IDisposable
             if (l.IsVisible && l.AffectsEmissive && !string.IsNullOrEmpty(l.ImagePath))
                 return true;
         return false;
+    }
+
+    /// <summary>
+    /// v1 PBR: cache vanilla ColorTable from GPU for each managed target group.
+    /// Idempotent — only fires for groups not yet cached. Must be called on the main thread.
+    /// Path matching: uses the redirected staged disk path (post-Penumbra) since the live
+    /// material's FileName contains the staged path, not the original.
+    /// </summary>
+    private unsafe void TryCacheVanillaColorTables(DecalProject project)
+    {
+        var charBase = textureSwap?.GetLocalPlayerCharacterBase();
+        if (charBase == null) return;
+
+        foreach (var group in project.Groups)
+        {
+            if (string.IsNullOrEmpty(group.MtrlGamePath)) continue;
+            if (vanillaColorTables.ContainsKey(group.MtrlGamePath!)) continue;
+
+            // After Penumbra redirect the live mtrl FileName contains the staged disk path,
+            // not the original. Match by the staged path (falling back to orig for first-time
+            // attempts before any redirect happened).
+            var matchDisk = previewMtrlDiskPaths.GetValueOrDefault(group.MtrlGamePath!)
+                            ?? group.OrigMtrlDiskPath
+                            ?? group.MtrlDiskPath;
+
+            if (textureSwap!.TryGetVanillaColorTable(
+                    charBase, group.MtrlGamePath!, matchDisk,
+                    out var ctData, out var ctW, out var ctH))
+            {
+                vanillaColorTables[group.MtrlGamePath!] = (ctData, ctW, ctH);
+                DebugServer.AppendLog(
+                    $"[PBR] Cached vanilla ColorTable {ctW}x{ctH} for {group.MtrlGamePath}");
+            }
+        }
+    }
+
+    /// <summary>Get (or lazily create) the row pair allocator for a target group.</summary>
+    public RowPairAllocator GetOrCreateAllocator(TargetGroup group)
+    {
+        var key = group.MtrlGamePath ?? group.Name;
+        return rowPairAllocators.GetOrAdd(key, _ => new RowPairAllocator());
+    }
+
+    /// <summary>
+    /// Resolve the g_SamplerIndex (0x565F8FD8) texture's game path from a group's mtrl,
+    /// caching the result. Returns null if mtrl is unreadable, the sampler is missing,
+    /// or its texture index is out of range.
+    /// </summary>
+    public string? GetIndexMapGamePath(TargetGroup group)
+    {
+        if (string.IsNullOrEmpty(group.MtrlGamePath)) return null;
+        if (indexMapGamePaths.TryGetValue(group.MtrlGamePath!, out var cached))
+            return cached;
+
+        try
+        {
+            // Load mtrl bytes via disk first, then SqPack fallback
+            var mtrlDisk = group.OrigMtrlDiskPath ?? group.MtrlDiskPath;
+            byte[]? mtrlBytes = null;
+            if (!string.IsNullOrEmpty(mtrlDisk) && File.Exists(mtrlDisk))
+                mtrlBytes = File.ReadAllBytes(mtrlDisk);
+            else
+            {
+                var pack = meshExtractor.GetSqPackInstance();
+                var sqResult = pack?.GetFile(group.MtrlGamePath!);
+                if (sqResult != null) mtrlBytes = sqResult.Value.file.RawData.ToArray();
+            }
+            if (mtrlBytes == null) return null;
+
+            // Parse via Lumina by writing to a temp file (Lumina API limitation)
+            var tempPath = Path.Combine(outputDir, $"temp_idx_{Guid.NewGuid():N}.mtrl");
+            File.WriteAllBytes(tempPath, mtrlBytes);
+            var lumina = meshExtractor.GetLuminaForDisk();
+            var mtrl = lumina!.GetFileFromDisk<MtrlFile>(tempPath);
+            try { File.Delete(tempPath); } catch { }
+
+            // Find sampler 0x565F8FD8 → texture index → string offset → null-terminated path
+            int texIndex = -1;
+            foreach (var s in mtrl.Samplers)
+            {
+                if (s.SamplerId == IndexSamplerId) { texIndex = s.TextureIndex; break; }
+            }
+            if (texIndex < 0 || texIndex >= mtrl.TextureOffsets.Length)
+            {
+                DebugServer.AppendLog($"[PBR] No g_SamplerIndex (0x565F8FD8) in mtrl {group.MtrlGamePath}");
+                return null;
+            }
+
+            int strOffset = mtrl.TextureOffsets[texIndex].Offset;
+            int end = strOffset;
+            while (end < mtrl.Strings.Length && mtrl.Strings[end] != 0) end++;
+            var indexGamePath = System.Text.Encoding.UTF8.GetString(mtrl.Strings, strOffset, end - strOffset);
+            if (string.IsNullOrEmpty(indexGamePath)) return null;
+
+            indexMapGamePaths[group.MtrlGamePath!] = indexGamePath;
+            DebugServer.AppendLog($"[PBR] Resolved index map for {group.Name}: {indexGamePath}");
+            return indexGamePath;
+        }
+        catch (Exception ex)
+        {
+            DebugServer.AppendLog($"[PBR] GetIndexMapGamePath failed for {group.Name}: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Diagnostic snapshot for HTTP /api/debug/pbr — returns one entry per managed group
+    /// describing allocator state and ColorTable cache hit/miss.
+    /// </summary>
+    public List<object> GetPbrDiagnostics(DecalProject project)
+    {
+        var result = new List<object>();
+        foreach (var group in project.Groups)
+        {
+            var alloc = GetOrCreateAllocator(group);
+            bool ctCached = !string.IsNullOrEmpty(group.MtrlGamePath)
+                && vanillaColorTables.ContainsKey(group.MtrlGamePath!);
+            (int W, int H) ctSize = (0, 0);
+            if (ctCached && vanillaColorTables.TryGetValue(group.MtrlGamePath!, out var v))
+                ctSize = (v.Width, v.Height);
+
+            var layerStates = new List<object>();
+            foreach (var l in group.Layers)
+            {
+                layerStates.Add(new
+                {
+                    name = l.Name,
+                    kind = l.Kind.ToString(),
+                    visible = l.IsVisible,
+                    allocatedRowPair = l.AllocatedRowPair,
+                    requiresRowPair = l.RequiresRowPair,
+                    affectsDiffuse = l.AffectsDiffuse,
+                    affectsSpecular = l.AffectsSpecular,
+                    affectsEmissive = l.AffectsEmissive,
+                    affectsRoughness = l.AffectsRoughness,
+                    affectsMetalness = l.AffectsMetalness,
+                    affectsSheen = l.AffectsSheen,
+                });
+            }
+
+            result.Add(new
+            {
+                groupName = group.Name,
+                mtrlGamePath = group.MtrlGamePath,
+                hasPbrLayers = group.HasPbrLayers(),
+                hasEmissiveLayers = group.HasEmissiveLayers(),
+                allocator = new
+                {
+                    scanned = alloc.Scanned,
+                    vanillaOccupied = alloc.VanillaOccupiedCount,
+                    available = alloc.AvailableSlots,
+                },
+                vanillaColorTable = new
+                {
+                    cached = ctCached,
+                    width = ctSize.W,
+                    height = ctSize.H,
+                    isDawntrail = ctCached && ColorTableBuilder.IsDawntrailLayout(ctSize.W, ctSize.H),
+                },
+                layers = layerStates,
+            });
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Called from UI when a layer needs a row pair (first Affects* toggled on).
+    /// Returns true on success; false on exhaustion (caller must toast and revert the toggle).
+    /// Lazy-scans vanilla normal histogram on first allocation per group, so we never
+    /// hand out a slot that vanilla is already using.
+    /// </summary>
+    public bool TryAllocateRowPairForLayer(TargetGroup group, DecalLayer layer)
+    {
+        if (layer.AllocatedRowPair >= 0) return true;   // already has one
+        var alloc = GetOrCreateAllocator(group);
+
+        // Critical: scan vanilla BEFORE allocating, otherwise we may hand out a row pair
+        // that vanilla already uses, causing layer PBR to bleed into vanilla regions.
+        EnsureVanillaScan(group, alloc);
+
+        var slot = alloc.TryAllocate();
+        if (slot == null)
+        {
+            DebugServer.AppendLog(
+                $"[PBR] Row pair exhausted for {group.Name} " +
+                $"(avail={alloc.AvailableSlots}, vanilla={alloc.VanillaOccupiedCount})");
+            return false;
+        }
+        layer.AllocatedRowPair = slot.Value;
+        DebugServer.AppendLog($"[PBR] Allocated row pair {slot.Value} to '{layer.Name}'");
+        return true;
+    }
+
+    /// <summary>
+    /// Vanilla scan: read the index map (g_SamplerIndex) and feed its R channel to
+    /// the row pair allocator so we never hand out a slot vanilla is already using.
+    /// Loads via SqPack — no Penumbra redirect needed, no GPU access required.
+    /// Idempotent.
+    /// </summary>
+    private void EnsureVanillaScan(TargetGroup group, RowPairAllocator alloc)
+    {
+        if (alloc.Scanned) return;
+
+        var indexGamePath = GetIndexMapGamePath(group);
+        if (string.IsNullOrEmpty(indexGamePath))
+        {
+            DebugServer.AppendLog($"[PBR] Vanilla scan skipped for {group.Name}: no index map sampler");
+            return;
+        }
+
+        var indexImg = LoadGameTexture(indexGamePath);
+        if (indexImg == null)
+        {
+            DebugServer.AppendLog($"[PBR] Vanilla scan failed for {group.Name}: cannot load index map {indexGamePath}");
+            return;
+        }
+
+        var (indexData, w, h) = indexImg.Value;
+        alloc.ScanVanillaOccupation(indexData, w, h);
+        DebugServer.AppendLog(
+            $"[PBR] Vanilla scan {group.Name}: vanillaOccupied={alloc.VanillaOccupiedCount}, available={alloc.AvailableSlots}");
+    }
+
+    /// <summary>
+    /// Release this layer's row pair if it no longer requires one.
+    /// Call after toggling off Affects* fields or before deleting a layer.
+    /// </summary>
+    public void ReleaseRowPairIfUnused(TargetGroup group, DecalLayer layer)
+    {
+        if (layer.AllocatedRowPair < 0) return;
+        if (layer.RequiresRowPair) return;  // still needed
+
+        var alloc = GetOrCreateAllocator(group);
+        alloc.Release(layer.AllocatedRowPair);
+        DebugServer.AppendLog($"[PreviewService] Released row pair {layer.AllocatedRowPair} from layer '{layer.Name}'");
+        layer.AllocatedRowPair = -1;
+    }
+
+    /// <summary>Force-release this layer's row pair (e.g. on layer deletion).</summary>
+    public void ForceReleaseRowPair(TargetGroup group, DecalLayer layer)
+    {
+        if (layer.AllocatedRowPair < 0) return;
+        var alloc = GetOrCreateAllocator(group);
+        alloc.Release(layer.AllocatedRowPair);
+        layer.AllocatedRowPair = -1;
     }
 
     /// <summary>Clear emissive hook targets (e.g. when emissive is disabled).</summary>
@@ -495,6 +872,10 @@ public class PreviewService : IDisposable
         previewDiskPaths.Clear();
         emissiveOffsets.Clear();
         previewMtrlDiskPaths.Clear();
+        rowPairAllocators.Clear();
+        vanillaColorTables.Clear();
+        indexMapGamePaths.Clear();
+        activeProject = null;
         emissiveHook?.ClearTargets();
         CanSwapInPlace = false;
         LastUpdateMode = "none";
@@ -588,6 +969,18 @@ public class PreviewService : IDisposable
 
     // ── Private: check if all groups can swap in-place ───────────────────────
 
+    // One-shot CanSwap=NO log gating — avoid spamming the log on every poll
+    private string? lastCanSwapDenyReason;
+
+    private void LogCanSwapDeny(string reason)
+    {
+        if (lastCanSwapDenyReason != reason)
+        {
+            DebugServer.AppendLog($"[PBR] CanSwap=NO {reason}");
+            lastCanSwapDenyReason = reason;
+        }
+    }
+
     private bool CheckCanSwapInPlace(DecalProject project)
     {
         if (initializedRedirects.Count == 0)
@@ -608,20 +1001,17 @@ public class PreviewService : IDisposable
 
             if (!initializedRedirects.ContainsKey(group.DiffuseGamePath))
             {
-                DebugServer.AppendLog(
-                    $"[PreviewService] CanSwap=NO diffuse not initialized: {group.DiffuseGamePath}");
+                LogCanSwapDeny($"diffuse not initialized: {group.DiffuseGamePath}");
                 CanSwapInPlace = false;
                 return false;
             }
 
-            if (group.HasEmissiveLayers())
+            if (group.HasEmissiveLayers() || group.HasPbrLayers())
             {
-                // If emissive layers exist but mtrl was never redirected, need full redraw
                 if (!string.IsNullOrEmpty(group.MtrlGamePath)
                     && !previewDiskPaths.ContainsKey(group.MtrlGamePath))
                 {
-                    DebugServer.AppendLog(
-                        $"[PreviewService] CanSwap=NO new emissive needs mtrl init: {group.MtrlGamePath}");
+                    LogCanSwapDeny($"PBR/emissive needs mtrl init: {group.MtrlGamePath}");
                     CanSwapInPlace = false;
                     return false;
                 }
@@ -630,8 +1020,7 @@ public class PreviewService : IDisposable
                     && previewDiskPaths.ContainsKey(group.NormGamePath)
                     && !initializedRedirects.ContainsKey(group.NormGamePath))
                 {
-                    DebugServer.AppendLog(
-                        $"[PreviewService] CanSwap=NO norm not initialized: {group.NormGamePath}");
+                    LogCanSwapDeny($"norm not initialized: {group.NormGamePath}");
                     CanSwapInPlace = false;
                     return false;
                 }
@@ -640,15 +1029,31 @@ public class PreviewService : IDisposable
                     && previewDiskPaths.ContainsKey(group.MtrlGamePath)
                     && !initializedRedirects.ContainsKey(group.MtrlGamePath))
                 {
-                    DebugServer.AppendLog(
-                        $"[PreviewService] CanSwap=NO mtrl not initialized: {group.MtrlGamePath}");
+                    LogCanSwapDeny($"mtrl not initialized: {group.MtrlGamePath}");
                     CanSwapInPlace = false;
                     return false;
                 }
+            }
 
+            // v1 PBR (character.shpk path): index map must be mounted before inplace can fire
+            if (group.HasPbrLayers())
+            {
+                var indexGamePath = GetIndexMapGamePath(group);
+                if (!string.IsNullOrEmpty(indexGamePath)
+                    && !previewDiskPaths.ContainsKey(indexGamePath))
+                {
+                    LogCanSwapDeny($"PBR needs index map init: {indexGamePath}");
+                    CanSwapInPlace = false;
+                    return false;
+                }
             }
         }
 
+        if (lastCanSwapDenyReason != null)
+        {
+            DebugServer.AppendLog("[PBR] CanSwap=YES");
+            lastCanSwapDenyReason = null;
+        }
         CanSwapInPlace = true;
         return true;
     }
@@ -686,22 +1091,54 @@ public class PreviewService : IDisposable
         int w = baseTex.Width, h = baseTex.Height;
 
         // Diffuse composite
+        // GPU diffuse — only paints layers with AffectsDiffuse=true
         var diffResult = CpuUvComposite(group.Layers, baseTex.Data, w, h);
+
+        // 3D editor preview diffuse — paints ALL visible layers with images so the user
+        // sees decal placement even when AffectsDiffuse is off (placement guide).
+        // Skip the second pass when no layer is "preview-only" (perf optimization).
+        bool hasPreviewOnly = false;
+        foreach (var l in group.Layers)
+        {
+            if (l.IsVisible && !string.IsNullOrEmpty(l.ImagePath) && !l.AffectsDiffuse)
+            { hasPreviewOnly = true; break; }
+        }
+        var diffPreview = hasPreviewOnly
+            ? CpuUvComposite(group.Layers, baseTex.Data, w, h, ignoreAffectsDiffuseFilter: true)
+            : diffResult;
+
+        // PBR-only or WholeMaterial-only groups produce no diffuse delta but still need the
+        // material mounted for inplace ColorTable swap. Synthesize a passthrough by cloning
+        // vanilla diffuse so the redirect pipeline can engage.
+        if (diffResult == null && group.HasPbrLayers())
+        {
+            diffResult = (byte[])baseTex.Data.Clone();
+            DebugServer.AppendLog($"[PBR] Passthrough diffuse for PBR-only group {group.Name}");
+        }
+        if (diffPreview == null && group.HasPbrLayers())
+            diffPreview = (byte[])baseTex.Data.Clone();
+
+        // 3D editor reads compositeResults — feed it the preview version
+        if (diffPreview != null)
+        {
+            compositeResults[group.DiffuseGamePath!] = (diffPreview, w, h);
+            Interlocked.Increment(ref compositeVersion);
+        }
+
+        // GPU/file path uses the filtered version
         if (diffResult != null)
         {
-            compositeResults[group.DiffuseGamePath!] = (diffResult, w, h);
-            Interlocked.Increment(ref compositeVersion);
-
             var safeName = MakeSafeFileName(group.Name);
             var path = Path.Combine(outputDir, $"preview_{safeName}_d.tex");
             WriteBgraTexFile(path, diffResult, w, h);
             redirects[group.DiffuseGamePath!] = path;
-            DebugServer.AppendLog($"[PreviewService] Diffuse → {group.DiffuseGamePath}");
         }
 
-        // Emissive: modify .mtrl + write emissive area into normal map alpha
+        // Emissive / PBR: modify .mtrl, write emissive into norm.a (skin.shpk legacy path),
+        // and mount index map for ColorTable PBR (character.shpk path).
         var hasEmissive = group.HasEmissiveLayers();
-        if (hasEmissive && !string.IsNullOrEmpty(group.MtrlGamePath))
+        var hasPbr = group.HasPbrLayers();
+        if ((hasEmissive || hasPbr) && !string.IsNullOrEmpty(group.MtrlGamePath))
         {
             var emissiveColor = GetCombinedEmissiveColor(group.Layers);
             var safeName = MakeSafeFileName(group.Name);
@@ -714,11 +1151,10 @@ public class PreviewService : IDisposable
                 previewMtrlDiskPaths[group.MtrlGamePath!] = mtrlOutPath;
                 if (emOffset >= 0)
                     emissiveOffsets[group.MtrlGamePath!] = emOffset;
-                DebugServer.AppendLog($"[PreviewService] Mtrl (emissive) → {group.MtrlGamePath} cbufOffset={emOffset}");
             }
 
-            // Write emissive area into normal map alpha channel
-            if (!string.IsNullOrEmpty(group.NormGamePath) && !string.IsNullOrEmpty(group.NormDiskPath))
+            // Legacy emissive path: write emissive into normal map alpha (skin.shpk fallback)
+            if (hasEmissive && !string.IsNullOrEmpty(group.NormGamePath) && !string.IsNullOrEmpty(group.NormDiskPath))
             {
                 var normDisk = group.OrigNormDiskPath ?? group.NormDiskPath;
                 var normResult = CompositeEmissiveNorm(group.Layers, normDisk!, w, h);
@@ -727,7 +1163,34 @@ public class PreviewService : IDisposable
                     var normPath = Path.Combine(outputDir, $"preview_{safeName}_n.tex");
                     WriteBgraTexFile(normPath, normResult, w, h);
                     redirects[group.NormGamePath!] = normPath;
-                    DebugServer.AppendLog($"[PreviewService] Norm (emissive alpha) → {group.NormGamePath}");
+                }
+            }
+
+            // v1 PBR (character.shpk path): mount index map (g_SamplerIndex 0x565F8FD8).
+            // First Full Redraw writes a passthrough vanilla copy; subsequent inplace updates
+            // overwrite it via CompositeIndexMap with row pair + weight in R/G channels.
+            if (hasPbr)
+            {
+                var indexGamePath = GetIndexMapGamePath(group);
+                if (!string.IsNullOrEmpty(indexGamePath))
+                {
+                    var indexImg = LoadGameTexture(indexGamePath);
+                    if (indexImg != null)
+                    {
+                        var (data, iw, ih) = indexImg.Value;
+                        var indexClone = (byte[])data.Clone();
+                        var indexPath = Path.Combine(outputDir, $"preview_{safeName}_id.tex");
+                        WriteBgraTexFile(indexPath, indexClone, iw, ih);
+                        redirects[indexGamePath] = indexPath;
+                        // Cache vanilla index bytes by the staged disk path so the background
+                        // composite can read them back as the baseline for CompositeIndexMap.
+                        baseTextureCache[indexPath] = (data, iw, ih);
+                        DebugServer.AppendLog($"[PBR] Mounted index map: {indexGamePath} → {indexPath}");
+                    }
+                    else
+                    {
+                        DebugServer.AppendLog($"[PBR] Failed to load vanilla index map: {indexGamePath}");
+                    }
                 }
             }
         }
@@ -829,10 +1292,10 @@ public class PreviewService : IDisposable
                     if (da < 0.001f) continue;
 
                     float maskValue;
-                    if (layer.EmissiveMask == EmissiveMask.DirectionalGradient)
+                    if (layer.FadeMask == LayerFadeMask.DirectionalGradient)
                         maskValue = ComputeDirectionalGradient(ru, rv, da,
-                            layer.GradientAngleDeg, layer.GradientScale, layer.EmissiveMaskFalloff, layer.GradientOffset);
-                    else if (layer.EmissiveMask == EmissiveMask.ShapeOutline)
+                            layer.GradientAngleDeg, layer.GradientScale, layer.FadeMaskFalloff, layer.GradientOffset);
+                    else if (layer.FadeMask == LayerFadeMask.ShapeOutline)
                     {
                         // Sample 8 neighbors at 1-pixel offset to detect alpha edges
                         float sum = 0; int cnt = 0;
@@ -844,10 +1307,10 @@ public class PreviewService : IDisposable
                             SampleBilinear(decalData, decalW, decalH, ndu, ndv, out _, out _, out _, out float na);
                             sum += na * opacity; cnt++;
                         }
-                        maskValue = ComputeShapeOutline(da, layer.EmissiveMaskFalloff, sum / cnt);
+                        maskValue = ComputeShapeOutline(da, layer.FadeMaskFalloff, sum / cnt);
                     }
                     else
-                        maskValue = ComputeEmissiveMask(layer.EmissiveMask, layer.EmissiveMaskFalloff, ru, rv, da);
+                        maskValue = ComputeFadeMaskWeight(layer.FadeMask, layer.FadeMaskFalloff, ru, rv, da);
 
                     int oIdx = (py * w + px) * 4;
                     byte emByte = (byte)Math.Clamp((int)(maskValue * 255), 0, 255);
@@ -859,6 +1322,120 @@ public class PreviewService : IDisposable
         }
 
         return anyEmissive ? output : null;
+    }
+
+    /// <summary>
+    /// v1 PBR index map rewrite: per Penumbra MaterialExporter:136-137, character.shpk
+    /// shaders read `tablePair = round(g_SamplerIndex.r / 17)` and `rowBlend = 1 - g/255`,
+    /// then `lerp(table[tablePair*2], table[tablePair*2+1], rowBlend)`. We write:
+    ///   index.R = rowPair * 17  (selects which row pair this pixel uses)
+    ///   index.G = weight * 255  (weight=1 ⇒ G=255 ⇒ rowBlend=0 ⇒ reads layer override row)
+    /// Vanilla B and A are preserved.
+    /// </summary>
+    private byte[]? CompositeIndexMap(List<DecalLayer> allocatedLayers, string indexDiskOrGamePath, int w, int h)
+    {
+        byte[] baseIndex;
+        if (baseTextureCache.TryGetValue(indexDiskOrGamePath, out var cachedIdx))
+        {
+            var (data, iw, ih) = cachedIdx;
+            baseIndex = (iw != w || ih != h) ? ResizeBilinear(data, iw, ih, w, h) : (byte[])data.Clone();
+        }
+        else
+        {
+            var indexImg = File.Exists(indexDiskOrGamePath)
+                ? imageLoader.LoadImage(indexDiskOrGamePath)
+                : LoadGameTexture(indexDiskOrGamePath);
+            if (indexImg == null) return null;
+            baseTextureCache[indexDiskOrGamePath] = indexImg.Value;
+            var (data, iw, ih) = indexImg.Value;
+            baseIndex = (iw != w || ih != h) ? ResizeBilinear(data, iw, ih, w, h) : (byte[])data.Clone();
+        }
+
+        var output = (byte[])baseIndex.Clone();
+        bool anyWritten = false;
+
+        // z-order: iterate layers front-to-back so later layers overwrite earlier ones
+        foreach (var layer in allocatedLayers)
+        {
+            if (!layer.IsVisible) continue;
+            if (layer.AllocatedRowPair < 0) continue;
+            if (string.IsNullOrEmpty(layer.ImagePath)) continue;
+
+            byte rowPairByte = (byte)Math.Clamp(layer.AllocatedRowPair * 17, 0, 255);
+            var decalImage = imageLoader.LoadImage(layer.ImagePath);
+            if (decalImage == null) continue;
+            var (decalData, decalW, decalH) = decalImage.Value;
+
+            var center = layer.UvCenter;
+            var scale = layer.UvScale;
+            var opacity = layer.Opacity;
+            var rotRad = layer.RotationDeg * (MathF.PI / 180f);
+            var cosR = MathF.Cos(rotRad);
+            var sinR = MathF.Sin(rotRad);
+
+            int pxMin = Math.Max(0, (int)((center.X - scale.X / 2f) * w));
+            int pxMax = Math.Min(w - 1, (int)((center.X + scale.X / 2f) * w));
+            int pyMin = Math.Max(0, (int)((center.Y - scale.Y / 2f) * h));
+            int pyMax = Math.Min(h - 1, (int)((center.Y + scale.Y / 2f) * h));
+
+            for (int py = pyMin; py <= pyMax; py++)
+            {
+                for (int px = pxMin; px <= pxMax; px++)
+                {
+                    float u = (px + 0.5f) / w;
+                    float v = (py + 0.5f) / h;
+                    float lu = (u - center.X) / scale.X;
+                    float lv = (v - center.Y) / scale.Y;
+                    float ru = lu * cosR + lv * sinR;
+                    float rv = -lu * sinR + lv * cosR;
+                    if (ru < -0.5f || ru > 0.5f || rv < -0.5f || rv > 0.5f) continue;
+                    switch (layer.Clip)
+                    {
+                        case ClipMode.ClipLeft when ru < 0f: continue;
+                        case ClipMode.ClipRight when ru >= 0f: continue;
+                        case ClipMode.ClipTop when rv < 0f: continue;
+                        case ClipMode.ClipBottom when rv >= 0f: continue;
+                    }
+
+                    float du = (ru + 0.5f) * decalW - 0.5f;
+                    float dv = (rv + 0.5f) * decalH - 0.5f;
+                    SampleBilinear(decalData, decalW, decalH, du, dv, out _, out _, out _, out float da);
+                    da *= opacity;
+                    if (da < 0.001f) continue;
+
+                    float weight;
+                    if (layer.FadeMask == LayerFadeMask.DirectionalGradient)
+                        weight = ComputeDirectionalGradient(ru, rv, da,
+                            layer.GradientAngleDeg, layer.GradientScale, layer.FadeMaskFalloff, layer.GradientOffset);
+                    else if (layer.FadeMask == LayerFadeMask.ShapeOutline)
+                    {
+                        float sum = 0; int cnt = 0;
+                        for (int dy = -1; dy <= 1; dy++)
+                        for (int dx = -1; dx <= 1; dx++)
+                        {
+                            if (dx == 0 && dy == 0) continue;
+                            float ndu = du + dx; float ndv = dv + dy;
+                            SampleBilinear(decalData, decalW, decalH, ndu, ndv, out _, out _, out _, out float na);
+                            sum += na * opacity; cnt++;
+                        }
+                        weight = ComputeShapeOutline(da, layer.FadeMaskFalloff, sum / cnt);
+                    }
+                    else
+                        weight = ComputeFadeMaskWeight(layer.FadeMask, layer.FadeMaskFalloff, ru, rv, da);
+
+                    weight = Math.Clamp(weight, 0f, 1f);
+                    if (weight <= 0.001f) continue;
+
+                    int oIdx = (py * w + px) * 4;
+                    output[oIdx + 0] = rowPairByte;                                  // .r = row pair * 17 (Penumbra MaterialExporter:136)
+                    output[oIdx + 1] = (byte)Math.Clamp((int)(weight * 255), 0, 255); // .g = weight (rowBlend = 1 - g/255, :137)
+                    // .b and .a left at vanilla values
+                    anyWritten = true;
+                }
+            }
+        }
+
+        return anyWritten ? output : null;
     }
 
     private static Vector3 GetCombinedEmissiveColor(List<DecalLayer> layers)
@@ -900,7 +1477,6 @@ public class PreviewService : IDisposable
             mtrl = lumina!.GetFileFromDisk<MtrlFile>(tempPath);
             try { File.Delete(tempPath); } catch { }
 
-            DebugServer.AppendLog($"[PreviewService] Loaded mtrl: {mtrlPath} ({mtrlBytes.Length} bytes)");
             return MtrlFileWriter.WriteEmissiveMtrl(mtrl, mtrlBytes, outputPath, emissiveColor, out emissiveByteOffset);
         }
         catch (Exception ex)
@@ -934,7 +1510,14 @@ public class PreviewService : IDisposable
         }
     }
 
-    private byte[]? CpuUvComposite(List<DecalLayer> layers, byte[] baseRgba, int w, int h)
+    /// <summary>
+    /// Composite layers' PNG into a diffuse RGBA buffer.
+    /// <paramref name="ignoreAffectsDiffuseFilter"/> = true: paint every visible layer with an
+    /// image, regardless of AffectsDiffuse — used for the 3D editor preview where the user
+    /// needs to see decal placement even when the layer doesn't actually paint the GPU diffuse.
+    /// </summary>
+    private byte[]? CpuUvComposite(List<DecalLayer> layers, byte[] baseRgba, int w, int h,
+        bool ignoreAffectsDiffuseFilter = false)
     {
         var output = (byte[])baseRgba.Clone();
         int processedLayers = 0;
@@ -942,7 +1525,7 @@ public class PreviewService : IDisposable
         foreach (var layer in layers)
         {
             if (!layer.IsVisible || string.IsNullOrEmpty(layer.ImagePath)) continue;
-            if (!layer.AffectsDiffuse) continue;
+            if (!ignoreAffectsDiffuseFilter && !layer.AffectsDiffuse) continue;
 
             var decalImage = imageLoader.LoadImage(layer.ImagePath);
             if (decalImage == null) continue;
@@ -959,8 +1542,6 @@ public class PreviewService : IDisposable
             int pxMax = Math.Min(w - 1, (int)((center.X + scale.X / 2f) * w));
             int pyMin = Math.Max(0, (int)((center.Y - scale.Y / 2f) * h));
             int pyMax = Math.Min(h - 1, (int)((center.Y + scale.Y / 2f) * h));
-
-            int hitPixels = 0;
 
             for (int py = pyMin; py <= pyMax; py++)
             {
@@ -1054,20 +1635,14 @@ public class PreviewService : IDisposable
                     output[oIdx + 1] = (byte)Math.Clamp((int)((rg * da + bg * (1 - da)) * 255), 0, 255);
                     output[oIdx + 2] = (byte)Math.Clamp((int)((rb * da + bb * (1 - da)) * 255), 0, 255);
                     output[oIdx + 3] = 255;
-
-                    hitPixels++;
                 }
             }
 
-            DebugServer.AppendLog($"[PreviewService] UV composite: layer '{layer.Name}' hit {hitPixels} pixels");
             processedLayers++;
         }
 
         if (processedLayers == 0)
-        {
-            DebugServer.AppendLog("[PreviewService] No visible layers with images");
             return null;
-        }
 
         return output;
     }
@@ -1117,9 +1692,9 @@ public class PreviewService : IDisposable
     /// <summary>
     /// Compute emissive mask value based on position within the decal.
     /// </summary>
-    public static float ComputeEmissiveMask(EmissiveMask mask, float falloff, float ru, float rv, float da)
+    public static float ComputeFadeMaskWeight(LayerFadeMask mask, float falloff, float ru, float rv, float da)
     {
-        if (mask == Core.EmissiveMask.Uniform)
+        if (mask == Core.LayerFadeMask.Uniform)
             return da;
 
         float dist = MathF.Sqrt(ru * ru + rv * rv) * 2f;
@@ -1133,16 +1708,16 @@ public class PreviewService : IDisposable
 
         switch (mask)
         {
-            case Core.EmissiveMask.RadialFadeOut:
+            case Core.LayerFadeMask.RadialFadeOut:
                 m = 1f - Smoothstep(0f, f, dist);
                 break;
-            case Core.EmissiveMask.RadialFadeIn:
+            case Core.LayerFadeMask.RadialFadeIn:
                 m = Smoothstep(1f - f, 1f, dist);
                 break;
-            case Core.EmissiveMask.EdgeGlow:
+            case Core.LayerFadeMask.EdgeGlow:
                 m = 1f - Smoothstep(0f, f, edgeDist);
                 break;
-            case Core.EmissiveMask.GaussianFeather:
+            case Core.LayerFadeMask.GaussianFeather:
                 float sigma = MathF.Max(f, 0.01f) * 0.5f;
                 float gEdge = MathF.Min(0.5f - MathF.Abs(ru), 0.5f - MathF.Abs(rv));
                 gEdge = MathF.Max(gEdge, 0f);
@@ -1236,6 +1811,9 @@ public class PreviewService : IDisposable
         previewMtrlDiskPaths.Clear();
         emissiveOffsets.Clear();
         initializedRedirects.Clear();
+        rowPairAllocators.Clear();
+        vanillaColorTables.Clear();
+        indexMapGamePaths.Clear();
         emissiveHook?.ClearTargets();
     }
 }
