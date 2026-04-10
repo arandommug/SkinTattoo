@@ -64,7 +64,7 @@ public class MeshExtractor
         try
         {
             var pack = GetSqPackInstance();
-            var result = pack.GetFile(gamePath);
+            var result = pack?.GetFile(gamePath);
             if (result != null)
             {
                 mdlBytes = result.Value.file.RawData.ToArray();
@@ -190,8 +190,7 @@ public class MeshExtractor
                 var pos = v.Position ?? Vector3.Zero;
                 var normal = (v.Normals != null && v.Normals.Length > 0) ? v.Normals[0] : Vector3.UnitY;
                 var rawUv = (v.TexCoords != null && v.TexCoords.Length > 0) ? v.TexCoords[0] : Vector2.Zero;
-                // FFXIV UV V is negative (0 to -1). Convert to compositor convention directly.
-                var uv = new Vector2(rawUv.X, 1.0f + rawUv.Y);
+                var uv = rawUv;
 
                 allVertices.Add(new MeshVertex
                 {

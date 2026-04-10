@@ -107,6 +107,15 @@ public class Configuration : IPluginConfiguration
     public string DefaultVersion { get; set; } = "1.0";
     public string? LastExportDir { get; set; }
 
+    // UV wireframe display options
+    public bool UvWireframeAntiAlias { get; set; } = false;
+    public bool UvWireframeCulling { get; set; } = true;
+    public bool UvWireframeDedup { get; set; } = false;
+    public float UvWireframeColorR { get; set; } = 0.3f;
+    public float UvWireframeColorG { get; set; } = 0.8f;
+    public float UvWireframeColorB { get; set; } = 1f;
+    public float UvWireframeColorA { get; set; } = 0.35f;
+
     // v1 PBR: if true, MainWindow shows a one-time dialog explaining the
     // EmissiveMask → LayerFadeMask semantics change (widens to all PBR fields).
     // Set to true on first load of any v3-saved project; cleared after user acks.

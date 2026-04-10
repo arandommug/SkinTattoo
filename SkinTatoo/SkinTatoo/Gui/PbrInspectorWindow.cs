@@ -10,20 +10,16 @@ using SkinTatoo.Services;
 
 namespace SkinTatoo.Gui;
 
-/// <summary>
-/// Glamourer-style read-only viewer for the PBR pipeline state of a target group:
-/// shows the four texture channels (diffuse / normal / index map / vanilla copies)
-/// plus a tabular view of the vanilla and currently-built ColorTable rows.
-/// Read-only; no mutation of plugin state.
-/// </summary>
 public class PbrInspectorWindow : Window
 {
     private readonly DecalProject project;
     private readonly PreviewService previewService;
     private readonly ITextureProvider textureProvider;
 
-    private bool showStaged = true;     // false = vanilla, true = current mod (staged)
-    private float thumbSize = 256f;
+    private bool showStaged = true;
+    private float thumbSize = 200f;
+    private int selectedTexTab;
+    private static readonly string[] TexTabNames = ["漫反射", "法线", "索引图"];
 
     public PbrInspectorWindow(
         DecalProject project,
@@ -38,16 +34,13 @@ public class PbrInspectorWindow : Window
 
         SizeConstraints = new WindowSizeConstraints
         {
-            MinimumSize = new Vector2(720, 520),
+            MinimumSize = new Vector2(600, 480),
             MaximumSize = new Vector2(float.MaxValue, float.MaxValue),
         };
     }
 
     public override void Draw()
     {
-        DrawToolbar();
-        ImGui.Separator();
-
         var group = project.SelectedGroup;
         if (group == null)
         {
@@ -55,54 +48,76 @@ public class PbrInspectorWindow : Window
             return;
         }
 
+        DrawHeader(group);
+        ImGui.Separator();
+
         using var scroll = ImRaii.Child("##PbrInspectorScroll", new Vector2(-1, -1), false);
         if (!scroll.Success) return;
 
-        DrawHeader(group);
+        DrawTextureSection(group);
+        ImGui.Spacing();
         ImGui.Separator();
-        DrawTextureGrid(group);
-        ImGui.Separator();
-        DrawColorTableTable(group);
-    }
-
-    private void DrawToolbar()
-    {
-        ImGui.Checkbox("显示当前 Mod (取消勾选 = vanilla)", ref showStaged);
-        ImGui.SameLine();
-        ImGui.SetNextItemWidth(120);
-        ImGui.SliderFloat("缩略图大小", ref thumbSize, 128f, 512f, "%.0f");
+        ImGui.Spacing();
+        DrawColorTableSection(group);
     }
 
     private void DrawHeader(TargetGroup group)
     {
+        // Target info + toggle
         var supports = previewService.MaterialSupportsPbr(group);
-        ImGui.Text($"目标: {group.Name}");
+
+        ImGui.AlignTextToFramePadding();
+        var statusColor = supports
+            ? new Vector4(0.3f, 0.9f, 0.3f, 1f)
+            : new Vector4(1f, 0.7f, 0.3f, 1f);
+        ImGui.TextColored(statusColor, supports ? "[PBR]" : "[Emissive]");
+        ImGui.SameLine();
+        ImGui.Text(group.Name);
+
         if (!string.IsNullOrEmpty(group.MtrlGamePath))
-            ImGui.TextDisabled($"mtrl: {group.MtrlGamePath}");
-        ImGui.TextColored(
-            supports ? new Vector4(0.4f, 1f, 0.4f, 1f) : new Vector4(1f, 0.7f, 0.3f, 1f),
-            supports ? "✓ 支持 PBR (有 g_SamplerIndex 与 ColorTable)"
-                     : "ⓘ 不支持 PBR (skin.shpk 类材质，仅发光可用)");
+        {
+            ImGui.SameLine();
+            ImGui.TextDisabled($"| {group.MtrlGamePath}");
+        }
+
+        // Right-aligned toggle
+        var toggleText = showStaged ? "Mod" : "Vanilla";
+        var toggleSize = ImGui.CalcTextSize(toggleText);
+        ImGui.SameLine(ImGui.GetContentRegionMax().X - toggleSize.X - 16);
+        if (ImGui.SmallButton(toggleText))
+            showStaged = !showStaged;
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(showStaged ? "当前显示 Mod 修改后 — 点击切换到 Vanilla" : "当前显示 Vanilla — 点击切换到 Mod");
     }
 
-    private void DrawTextureGrid(TargetGroup group)
+    private void DrawTextureSection(TargetGroup group)
     {
-        ImGui.TextDisabled("纹理通道（左：合成后 / 右：原始 vanilla）");
-        var indexGamePath = previewService.GetIndexMapGamePath(group);
+        // Tab bar for texture channels
+        if (ImGui.BeginTabBar("##TexTabs"))
+        {
+            var indexGamePath = previewService.GetIndexMapGamePath(group);
+            string?[] paths = [group.DiffuseGamePath, group.NormGamePath, indexGamePath];
 
-        // 2x2 layout: top row = Diffuse + Normal, bottom row = Index + (info)
-        DrawThumbRow("漫反射 (Diffuse)", group.DiffuseGamePath);
-        DrawThumbRow("法线 (Normal)", group.NormGamePath);
-        DrawThumbRow("索引图 (Index Map)", indexGamePath);
+            for (int i = 0; i < TexTabNames.Length; i++)
+            {
+                var tabFlags = (i == selectedTexTab) ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None;
+                if (ImGui.BeginTabItem(TexTabNames[i], tabFlags))
+                {
+                    selectedTexTab = i;
+                    ImGui.Spacing();
+                    DrawTexturePreview(TexTabNames[i], paths[i]);
+                    ImGui.EndTabItem();
+                }
+            }
+            ImGui.EndTabBar();
+        }
     }
 
-    private void DrawThumbRow(string label, string? gamePath)
+    private void DrawTexturePreview(string label, string? gamePath)
     {
-        ImGui.Spacing();
-        ImGui.TextColored(new Vector4(0.85f, 0.85f, 1f, 1f), label);
         if (string.IsNullOrEmpty(gamePath))
         {
-            ImGui.TextDisabled("  (该组未配置此纹理)");
+            ImGui.TextDisabled("该组未配置此纹理");
             return;
         }
 
@@ -111,76 +126,84 @@ public class PbrInspectorWindow : Window
 
         try
         {
-            // Use staged disk file if available and the user is viewing the mod;
-            // otherwise fall back to the vanilla SqPack copy via game path.
             var shared = !string.IsNullOrEmpty(resolvedPath) && File.Exists(resolvedPath)
                 ? textureProvider.GetFromFile(resolvedPath)
                 : textureProvider.GetFromGame(gamePath!);
             var wrap = shared.GetWrapOrDefault();
             if (wrap == null)
             {
-                ImGui.TextDisabled("  (纹理未就绪)");
+                ImGui.TextDisabled("纹理未就绪");
                 return;
             }
 
-            var imgSize = new Vector2(thumbSize, thumbSize);
-            ImGui.Image(wrap.Handle, imgSize);
+            // Size slider
+            ImGui.AlignTextToFramePadding();
+            ImGui.TextDisabled("大小");
             ImGui.SameLine();
-            using (ImRaii.Group())
-            {
-                ImGui.TextDisabled($"游戏路径: {gamePath}");
-                if (showStaged && !string.IsNullOrEmpty(stagedDisk))
-                    ImGui.TextDisabled($"Mod 文件: {stagedDisk}");
-                else
-                    ImGui.TextDisabled("(显示 vanilla)");
-                ImGui.TextDisabled($"实际像素: {wrap.Width}x{wrap.Height}");
-            }
+            ImGui.SetNextItemWidth(120);
+            ImGui.SliderFloat("##thumbSz", ref thumbSize, 128f, 512f, "%.0f");
+
+            // Texture display
+            var avail = ImGui.GetContentRegionAvail().X;
+            var displaySize = Math.Min(thumbSize, avail);
+            ImGui.Image(wrap.Handle, new Vector2(displaySize, displaySize));
+
+            // Info below
+            ImGui.TextDisabled($"像素: {wrap.Width} x {wrap.Height}");
+            ImGui.TextDisabled($"路径: {gamePath}");
+            if (showStaged && !string.IsNullOrEmpty(stagedDisk))
+                ImGui.TextDisabled($"Mod:  {stagedDisk}");
         }
         catch (Exception ex)
         {
-            ImGui.TextDisabled($"  (加载失败: {ex.Message})");
+            ImGui.TextDisabled($"加载失败: {ex.Message}");
         }
     }
 
-    private void DrawColorTableTable(TargetGroup group)
+    private void DrawColorTableSection(TargetGroup group)
     {
-        ImGui.TextDisabled("ColorTable 行（仅 character.shpk 类材质）");
+        ImGui.TextColored(new Vector4(0.85f, 0.85f, 1f, 1f), "ColorTable");
+        ImGui.SameLine();
+        ImGui.TextDisabled("(仅 character.shpk 类材质)");
+
         var vanilla = previewService.GetVanillaColorTable(group);
         var current = previewService.GetLastBuiltColorTable(group);
 
         if (vanilla == null)
         {
-            ImGui.TextDisabled("vanilla ColorTable 尚未缓存——触发一次预览后再查看");
+            ImGui.TextDisabled("触发一次预览后再查看");
             return;
         }
         if (!ColorTableBuilder.IsDawntrailLayout(vanilla.Value.Width, vanilla.Value.Height))
         {
-            ImGui.TextDisabled($"非 Dawntrail 布局: {vanilla.Value.Width}×{vanilla.Value.Height}（暂不可视化）");
+            ImGui.TextDisabled($"非 Dawntrail 布局: {vanilla.Value.Width} x {vanilla.Value.Height}");
             return;
         }
 
-        // Pick which table to show — staged-current if available, otherwise vanilla.
         var table = (showStaged && current.HasValue) ? current.Value : vanilla.Value;
         bool isCurrent = (showStaged && current.HasValue);
-        ImGui.TextDisabled(isCurrent ? "（显示当前 mod 修改后的）" : "（显示 vanilla / 未修改）");
+        ImGui.TextDisabled(isCurrent ? "(显示 Mod 修改后)" : "(显示 Vanilla)");
 
-        // Dawntrail layout: 32 rows × 8 vec4. Render each row as a colored swatch
-        // showing diffuse / specular / emissive vec4 RGB and the scalar Roughness/Metalness.
         int width = table.Width;
         int height = table.Height;
-        int rowStride = width * 4;   // halves per row
+        int rowStride = width * 4;
         var data = table.Data;
 
+        ImGui.Spacing();
+
         if (ImGui.BeginTable("##PbrColorTable", 7,
-            ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingFixedFit))
+            ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingFixedFit
+            | ImGuiTableFlags.ScrollY,
+            new Vector2(-1, ImGui.GetContentRegionAvail().Y)))
         {
-            ImGui.TableSetupColumn("行", ImGuiTableColumnFlags.WidthFixed, 30);
-            ImGui.TableSetupColumn("Pair", ImGuiTableColumnFlags.WidthFixed, 36);
-            ImGui.TableSetupColumn("漫反射", ImGuiTableColumnFlags.WidthFixed, 64);
-            ImGui.TableSetupColumn("镜面", ImGuiTableColumnFlags.WidthFixed, 64);
-            ImGui.TableSetupColumn("发光", ImGuiTableColumnFlags.WidthFixed, 64);
-            ImGui.TableSetupColumn("粗糙度", ImGuiTableColumnFlags.WidthFixed, 60);
-            ImGui.TableSetupColumn("金属度", ImGuiTableColumnFlags.WidthFixed, 60);
+            ImGui.TableSetupScrollFreeze(0, 1);
+            ImGui.TableSetupColumn("行", ImGuiTableColumnFlags.WidthFixed, 28);
+            ImGui.TableSetupColumn("对", ImGuiTableColumnFlags.WidthFixed, 28);
+            ImGui.TableSetupColumn("漫反射", ImGuiTableColumnFlags.WidthFixed, 56);
+            ImGui.TableSetupColumn("镜面", ImGuiTableColumnFlags.WidthFixed, 56);
+            ImGui.TableSetupColumn("发光", ImGuiTableColumnFlags.WidthFixed, 56);
+            ImGui.TableSetupColumn("粗糙", ImGuiTableColumnFlags.WidthFixed, 48);
+            ImGui.TableSetupColumn("金属", ImGuiTableColumnFlags.WidthFixed, 48);
             ImGui.TableHeadersRow();
 
             for (int row = 0; row < height; row++)
@@ -189,23 +212,39 @@ public class PbrInspectorWindow : Window
                 int pair = row / 2;
 
                 ImGui.TableNextRow();
-                ImGui.TableNextColumn();
-                ImGui.Text(row.ToString());
-                ImGui.TableNextColumn();
-                ImGui.Text(pair.ToString());
 
-                // Dawntrail offsets per ColorTableBuilder layout
-                ImGui.TableNextColumn(); DrawColorSwatch(
+                // Row index
+                ImGui.TableNextColumn();
+                ImGui.TextDisabled(row.ToString());
+
+                // Pair index
+                ImGui.TableNextColumn();
+                ImGui.TextDisabled(pair.ToString());
+
+                // Diffuse
+                ImGui.TableNextColumn();
+                DrawColorSwatch(
                     (float)data[baseIdx + 0], (float)data[baseIdx + 1], (float)data[baseIdx + 2]);
-                ImGui.TableNextColumn(); DrawColorSwatch(
+
+                // Specular
+                ImGui.TableNextColumn();
+                DrawColorSwatch(
                     (float)data[baseIdx + 4], (float)data[baseIdx + 5], (float)data[baseIdx + 6]);
-                ImGui.TableNextColumn(); DrawColorSwatch(
+
+                // Emissive
+                ImGui.TableNextColumn();
+                DrawColorSwatch(
                     (float)data[baseIdx + 8], (float)data[baseIdx + 9], (float)data[baseIdx + 10]);
 
+                // Roughness
                 ImGui.TableNextColumn();
-                ImGui.Text($"{(float)data[baseIdx + 16]:F2}");
+                var rough = (float)data[baseIdx + 16];
+                ImGui.Text($"{rough:F2}");
+
+                // Metalness
                 ImGui.TableNextColumn();
-                ImGui.Text($"{(float)data[baseIdx + 18]:F2}");
+                var metal = (float)data[baseIdx + 18];
+                ImGui.Text($"{metal:F2}");
             }
             ImGui.EndTable();
         }
@@ -220,12 +259,12 @@ public class PbrInspectorWindow : Window
             1f);
         var draw = ImGui.GetWindowDrawList();
         var pos = ImGui.GetCursorScreenPos();
-        var size = new Vector2(56, ImGui.GetFrameHeight());
-        draw.AddRectFilled(pos, pos + size, ImGui.ColorConvertFloat4ToU32(col), 2f);
+        var size = new Vector2(48, ImGui.GetFrameHeight() - 2);
+        draw.AddRectFilled(pos, pos + size, ImGui.ColorConvertFloat4ToU32(col), 3f);
         draw.AddRect(pos, pos + size,
-            ImGui.ColorConvertFloat4ToU32(new Vector4(0f, 0f, 0f, 0.5f)), 2f);
+            ImGui.ColorConvertFloat4ToU32(new Vector4(0.3f, 0.3f, 0.3f, 0.6f)), 3f);
         ImGui.Dummy(size);
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip($"R={r:F3}\nG={g:F3}\nB={b:F3}");
+            ImGui.SetTooltip($"R={r:F3}  G={g:F3}  B={b:F3}");
     }
 }

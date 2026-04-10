@@ -1,3 +1,5 @@
+using System;
+using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Windowing;
 
@@ -10,15 +12,9 @@ public class ConfigWindow : Window
     private static readonly int[] ResolutionOptions = [512, 1024, 2048, 4096];
     private static readonly string[] ResolutionNames = ["512", "1024", "2048", "4096"];
 
-    // Slider drag state — SliderInt would otherwise fire every frame during drag, saving
-    // config every tick AND taking effect mid-drag (so dragging to 0 immediately spams
-    // 60Hz full SwapTexture which chokes the main thread). We buffer the value in
-    // pendingSwapInterval and only commit on IsItemDeactivatedAfterEdit (mouse release).
     private int pendingSwapInterval;
     private bool draggingSwapInterval;
 
-    // Floor the slider at 33ms ≈ 30Hz — the compose loop itself caps at ~30Hz so swapping
-    // faster than that is pure main-thread waste.
     private const int SwapIntervalMin = 33;
     private const int SwapIntervalMax = 500;
     private const int SwapIntervalDefault = 150;
@@ -29,17 +25,19 @@ public class ConfigWindow : Window
         this.config = config;
 
         Flags = ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoScrollbar;
-        Size = new System.Numerics.Vector2(360, 320);
+        Size = new Vector2(380, 460);
     }
 
     public override void Draw()
     {
-        ImGui.TextDisabled("HTTP 调试服务器");
-        ImGui.Separator();
+        const float labelW = 90f;
 
-        var port = config.HttpPort;
+        // ── HTTP Server ──
+        DrawSectionHeader("HTTP 调试服务器");
+        ImGui.AlignTextToFramePadding(); ImGui.Text("端口号"); ImGui.SameLine(labelW);
         ImGui.SetNextItemWidth(120);
-        if (ImGui.InputInt("端口号", ref port, 1, 100))
+        var port = config.HttpPort;
+        if (ImGui.InputInt("##port", ref port, 1, 100))
         {
             if (port is >= 1024 and <= 65535)
             {
@@ -49,30 +47,30 @@ public class ConfigWindow : Window
         }
 
         ImGui.Spacing();
-        ImGui.TextDisabled("贴图分辨率");
-        ImGui.Separator();
 
-        var resIdx = System.Array.IndexOf(ResolutionOptions, config.TextureResolution);
-        if (resIdx < 0) resIdx = 1;
+        // ── Texture ──
+        DrawSectionHeader("贴图分辨率");
+        ImGui.AlignTextToFramePadding(); ImGui.Text("分辨率"); ImGui.SameLine(labelW);
         ImGui.SetNextItemWidth(120);
-        if (ImGui.Combo("分辨率", ref resIdx, ResolutionNames, ResolutionNames.Length))
+        var resIdx = Array.IndexOf(ResolutionOptions, config.TextureResolution);
+        if (resIdx < 0) resIdx = 1;
+        if (ImGui.Combo("##res", ref resIdx, ResolutionNames, ResolutionNames.Length))
         {
             config.TextureResolution = ResolutionOptions[resIdx];
             config.Save();
         }
 
         ImGui.Spacing();
-        ImGui.TextDisabled("游戏贴图刷新");
-        ImGui.Separator();
 
-        // Only sync the buffered value from config when the user is NOT mid-drag, so the
-        // slider visibly "holds" the value the user is currently pointing at between frames.
+        // ── Swap Interval ──
+        DrawSectionHeader("游戏贴图刷新");
+
         if (!draggingSwapInterval)
-            pendingSwapInterval = System.Math.Clamp(config.GameSwapIntervalMs, SwapIntervalMin, SwapIntervalMax);
+            pendingSwapInterval = Math.Clamp(config.GameSwapIntervalMs, SwapIntervalMin, SwapIntervalMax);
 
-        ImGui.Text("刷新间隔");
-        ImGui.SetNextItemWidth(200);
-        ImGui.SliderInt("##SwapIntervalSlider", ref pendingSwapInterval, SwapIntervalMin, SwapIntervalMax, "%d ms");
+        ImGui.AlignTextToFramePadding(); ImGui.Text("刷新间隔"); ImGui.SameLine(labelW);
+        ImGui.SetNextItemWidth(160);
+        ImGui.SliderInt("##SwapInt", ref pendingSwapInterval, SwapIntervalMin, SwapIntervalMax, "%d ms");
         draggingSwapInterval = ImGui.IsItemActive();
         if (ImGui.IsItemDeactivatedAfterEdit())
         {
@@ -82,21 +80,57 @@ public class ConfigWindow : Window
         }
 
         ImGui.SameLine();
-        if (ImGui.Button($"恢复默认 ({SwapIntervalDefault})"))
+        if (ImGui.SmallButton("默认"))
         {
             pendingSwapInterval = SwapIntervalDefault;
             config.GameSwapIntervalMs = SwapIntervalDefault;
             config.Save();
             draggingSwapInterval = false;
         }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip($"恢复默认值 ({SwapIntervalDefault}ms)");
 
-        ImGui.TextDisabled("拖动时游戏侧贴图的最小刷新间隔。");
-        ImGui.TextDisabled("数值越小越实时、主线程负担越高。");
-        ImGui.TextDisabled("松开鼠标后才会应用。3D 编辑器预览不受此限制。");
+        ImGui.TextDisabled("拖动时游戏贴图最小刷新间隔。数值越小越实时。");
+        ImGui.TextDisabled("松手后才应用。3D 编辑器预览不受此限制。");
+
+        ImGui.Spacing();
+
+        // ── UV Wireframe ──
+        DrawSectionHeader("UV 网格线框");
+
+        var uvAA = config.UvWireframeAntiAlias;
+        if (ImGui.Checkbox("抗锯齿##uvAA", ref uvAA))
+        {
+            config.UvWireframeAntiAlias = uvAA;
+            config.Save();
+        }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("关闭可显著提升线框渲染性能");
+
+        var uvCull = config.UvWireframeCulling;
+        if (ImGui.Checkbox("视口外剔除##uvCull", ref uvCull))
+        {
+            config.UvWireframeCulling = uvCull;
+            config.Save();
+        }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("跳过完全在画布可见区域之外的三角形");
+
+        var uvDedup = config.UvWireframeDedup;
+        if (ImGui.Checkbox("共享边去重##uvDedup", ref uvDedup))
+        {
+            config.UvWireframeDedup = uvDedup;
+            config.Save();
+        }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("相邻三角形的共享边只画一次，减少约 50%% 绘制量\n会增加少量 CPU 开销");
 
         ImGui.Spacing();
         ImGui.Separator();
-        ImGui.TextColored(new System.Numerics.Vector4(1, 0.8f, 0.3f, 1),
-            "修改端口或分辨率后需重启插件才能生效。");
+        ImGui.Spacing();
+        ImGui.TextColored(new Vector4(1, 0.8f, 0.3f, 1),
+            "修改端口或分辨率后需重启插件生效。");
+    }
+
+    private static void DrawSectionHeader(string text)
+    {
+        ImGui.TextColored(new Vector4(0.7f, 0.85f, 1f, 1f), text);
+        ImGui.Separator();
     }
 }

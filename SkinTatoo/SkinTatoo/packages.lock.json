@@ -4,9 +4,9 @@
     "net10.0-windows7.0": {
       "DalamudPackager": {
         "type": "Direct",
-        "requested": "[14.0.2, )",
-        "resolved": "14.0.2",
-        "contentHash": "dQJeq+8eyHzra4Cg5eZ/3LAeS3/UpvvLriYJGSncMK9LqJ7Q4B6jwcOsxo3PfxVd15xj+IzVFxkPqIBmPQu8/w=="
+        "requested": "[14.0.0, )",
+        "resolved": "14.0.0",
+        "contentHash": "9c1q/eAeAs82mkQWBOaCvbt3GIQxAIadz5b/7pCXDIy9nHPtnRc+tDXEvKR+M36Wvi7n+qBTevRupkLUQp6DFA=="
       },
       "DotNet.ReproducibleBuilds": {
         "type": "Direct",
@@ -78,6 +78,12 @@
         "requested": "[2.*, )",
         "resolved": "2.30.15",
         "contentHash": "7QqbupVhz2kcFUPTgMw4iHR9rYDHGundzzee19Mwmd1typ2Lnv8EVJcLJxlkeBM2+4ex0NwsMtdbGSJctp1XCQ=="
+      },
+      "StbImageWriteSharp": {
+        "type": "Direct",
+        "requested": "[1.16.7, )",
+        "resolved": "1.16.7",
+        "contentHash": "NF9kOxi0iS9VunklnRKgOpAWC2knCGKRjdy7RT6XAqYNyb7LQfyPHPdl4l1fJw7TFYKrGQzQOmK1XpBONC2MoA=="
       },
       "BCnEncoder.Net": {
         "type": "Transitive",

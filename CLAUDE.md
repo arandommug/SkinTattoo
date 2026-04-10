@@ -30,7 +30,15 @@ SkinTatoo/SkinTatoo/                  # 主项目
   Services/                           # PreviewService, TexFileWriter, DecalImageLoader, MtrlFileWriter
   Shaders/                            # HLSL 着色器 (Model.hlsl)
   Http/                               # EmbedIO HTTP 调试服务器 (localhost:14780)
-  Gui/                                # ImGui 窗口 (MainWindow, ConfigWindow, DebugWindow, ModelEditorWindow)
+  Gui/                                # ImGui 窗口
+    MainWindow.cs                     # 主窗口核心 (partial: 工具栏/布局/初始化)
+    MainWindow.Canvas.cs              # UV 画布 + 网格线
+    MainWindow.LayerPanel.cs          # 左面板: 图层列表
+    MainWindow.ParameterPanel.cs      # 右面板: 参数/PBR
+    MainWindow.ResourceBrowser.cs     # 资源浏览器 + 模型检测
+    ModelEditorWindow.cs              # 3D 编辑器
+    PbrInspectorWindow.cs             # PBR 通道查看器
+    ConfigWindow.cs / DebugWindow.cs / ModExportWindow.cs
 docs/                                 # 技术文档
   ConstantBuffer逆向分析.md           # CBuffer 内存布局和渲染管线分析
   材质替换路线研究.md                 # PBR/金属化/石化的可行路线评估
@@ -228,7 +236,7 @@ RayPicker (射线拾取) → UV 坐标 → DecalLayer.UvCenter → 合成管线
 ### 坐标系约定
 - **World 矩阵**: `Scaling(-1, 1, 1)` — FFXIV 模型 X 轴镜像
 - **相机默认**: `Yaw = 0` — 模型正面朝向相机
-- **Mesh UV**: `uv = (rawUv.X, 1 + rawUv.Y)` — 直接匹配合成器约定（FFXIV 原始 V 为负值）
+- **Mesh UV**: `uv = rawUv` — Meddle 返回原始 UV，直接使用（FFXIV 身体模型 UV X 通常在 [1,2]，画布通过 `uvScale` 映射到虚拟正方形空间的右半边）
 - **射线拾取**: 射线 X 取反（匹配 World X 镜像），UV 直接使用（无需翻转）
 - **Shader**: `output.uv = input.uv`（无翻转）
 

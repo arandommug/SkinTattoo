@@ -396,7 +396,12 @@ public class ModelEditorWindow : Window, IDisposable
                     var layer = project.SelectedLayer;
                     if (layer != null)
                     {
-                        layer.UvCenter = hit.Value.UV;
+                        // Convert raw mesh UV to texture space [0,1].
+                        // Body models have UV X∈[1,2] (tile 1), frac maps to [0,1].
+                        var rawUv = hit.Value.UV;
+                        layer.UvCenter = new Vector2(
+                            rawUv.X - MathF.Floor(rawUv.X),
+                            rawUv.Y - MathF.Floor(rawUv.Y));
                         previewService.MarkDirty();
                     }
                 }

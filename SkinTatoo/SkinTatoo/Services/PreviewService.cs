@@ -2283,6 +2283,12 @@ public class PreviewService : IDisposable
         DebugServer.AppendLog("[PreviewService] Texture cache cleared");
     }
 
+    public void ClearMesh()
+    {
+        currentMesh = null;
+        DebugServer.AppendLog("[PreviewService] Mesh cleared");
+    }
+
     /// <summary>Read the on-disk dimensions of a decal image (PNG/JPG/TGA/DDS/TEX). Returns null on failure.</summary>
     public (int Width, int Height)? GetImageDimensions(string path)
     {
@@ -2295,6 +2301,13 @@ public class PreviewService : IDisposable
     {
         var tex = LoadBaseTexture(group);
         return (tex.Width, tex.Height);
+    }
+
+    /// <summary>Get the base diffuse texture RGBA data for export.</summary>
+    public (byte[] Data, int Width, int Height)? GetBaseTextureData(TargetGroup group)
+    {
+        try { return LoadBaseTexture(group); }
+        catch { return null; }
     }
 
     public void Dispose()
