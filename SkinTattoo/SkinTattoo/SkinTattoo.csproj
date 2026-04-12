@@ -28,6 +28,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Reference Remove="Lumina" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\Penumbra.Api\Penumbra.Api.csproj" />
     <ProjectReference Include="..\..\Lumina\src\Lumina\Lumina.csproj" />
     <ProjectReference Include="..\..\Meddle\Meddle\Meddle.Utils\Meddle.Utils.csproj" />

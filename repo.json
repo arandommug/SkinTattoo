@@ -1,0 +1,22 @@
+[
+  {
+    "Author": "Shiro",
+    "Name": "SkinTattoo",
+    "Punchline": "实时皮肤贴花投影与预览",
+    "Description": "将 PNG 贴花投影到角色皮肤上，支持漫反射和法线通道，通过 Penumbra 实时预览。使用 /skintattoo 打开。",
+    "InternalName": "SkinTattoo",
+    "AssemblyVersion": "0.0.0.1",
+    "TestingAssemblyVersion": "0.0.0.1",
+    "RepoUrl": "https://github.com/TheDeathDragon/SkinTattoo",
+    "ApplicableVersion": "any",
+    "DalamudApiLevel": 14,
+    "TestingDalamudApiLevel": 14,
+    "IsHide": "False",
+    "IsTestingExclusive": "False",
+    "DownloadCount": 0,
+    "LastUpdate": 0,
+    "DownloadLinkInstall": "https://github.com/TheDeathDragon/SkinTattoo/releases/download/v0.0.0.1/SkinTattoo.zip",
+    "DownloadLinkTesting": "https://github.com/TheDeathDragon/SkinTattoo/releases/download/v0.0.0.1/SkinTattoo.zip",
+    "DownloadLinkUpdate": "https://github.com/TheDeathDragon/SkinTattoo/releases/download/v0.0.0.1/SkinTattoo.zip"
+  }
+]

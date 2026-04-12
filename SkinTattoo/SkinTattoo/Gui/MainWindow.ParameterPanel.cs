@@ -135,14 +135,14 @@ public partial class MainWindow
         if (scaleLocked)
         {
             var s = uvScale.X;
-            if (ImGui.DragFloat("##scaleLocked", ref s, 0.005f, 0.01f, 2f, "%.3f"))
+            if (ImGui.DragFloat("##scaleLocked", ref s, 0.005f, 0.01f, 10f, "%.3f"))
             { layer.UvScale = new Vector2(s, s * texAspect); MarkPreviewDirty(); }
-            if (ScrollAdjust(ref s, 0.005f, 0.01f, 2f))
+            if (ScrollAdjust(ref s, 0.005f, 0.01f, 10f))
             { layer.UvScale = new Vector2(s, s * texAspect); MarkPreviewDirty(); }
         }
         else
         {
-            if (ImGui.DragFloat2("##scaleUnlocked", ref uvScale, 0.005f, 0.01f, 2f, "%.3f"))
+            if (ImGui.DragFloat2("##scaleUnlocked", ref uvScale, 0.005f, 0.01f, 10f, "%.3f"))
             { layer.UvScale = uvScale; MarkPreviewDirty(); }
         }
         if (ImGui.IsItemHovered()) ImGui.SetTooltip(scaleLocked ? "大小（像素等比）" : "大小（UV 独立）");

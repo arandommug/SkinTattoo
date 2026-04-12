@@ -89,7 +89,7 @@ public class Configuration : IPluginConfiguration
     public bool ModelEditorWindowOpen { get; set; }
     public bool PbrInspectorWindowOpen { get; set; }
     public string? LastImageDir { get; set; }
-    public bool AutoPreview { get; set; }
+    public bool AutoPreview { get; set; } = true;
     public bool UseGpuSwap { get; set; } = true;
 
     // GPU swap throttle: 4096^2 SwapTexture costs 5-15ms, throttle to avoid exceeding frame budget
@@ -102,10 +102,10 @@ public class Configuration : IPluginConfiguration
     public bool UvWireframeAntiAlias { get; set; } = false;
     public bool UvWireframeCulling { get; set; } = true;
     public bool UvWireframeDedup { get; set; } = false;
-    public float UvWireframeColorR { get; set; } = 0.3f;
-    public float UvWireframeColorG { get; set; } = 0.8f;
+    public float UvWireframeColorR { get; set; } = 0f;
+    public float UvWireframeColorG { get; set; } = 0.141f;
     public float UvWireframeColorB { get; set; } = 1f;
-    public float UvWireframeColorA { get; set; } = 0.35f;
+    public float UvWireframeColorA { get; set; } = 0.784f;
 
     [NonSerialized]
     private IDalamudPluginInterface? pluginInterface;

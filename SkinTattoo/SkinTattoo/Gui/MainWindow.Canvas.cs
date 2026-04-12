@@ -498,14 +498,14 @@ public partial class MainWindow
                         // Aspect ratio correction so decal stays square in pixel space
                         float texAspect = (lastBaseTexWidth > 0 && lastBaseTexHeight > 0)
                             ? (float)lastBaseTexWidth / lastBaseTexHeight : 1f;
-                        var s = Math.Clamp(selectedLayer!.UvScale.X + scaleDelta, 0.01f, 2f);
+                        var s = Math.Clamp(selectedLayer!.UvScale.X + scaleDelta, 0.01f, 10f);
                         selectedLayer.UvScale = new Vector2(s, s * texAspect);
                     }
                     else
                     {
                         selectedLayer!.UvScale = new Vector2(
-                            Math.Clamp(selectedLayer.UvScale.X + scaleDelta, 0.01f, 2f),
-                            Math.Clamp(selectedLayer.UvScale.Y + scaleDelta, 0.01f, 2f));
+                            Math.Clamp(selectedLayer.UvScale.X + scaleDelta, 0.01f, 10f),
+                            Math.Clamp(selectedLayer.UvScale.Y + scaleDelta, 0.01f, 10f));
                     }
                 }
                 MarkPreviewDirty();

@@ -5,12 +5,21 @@
   </PropertyGroup>
 
   <!-- Auto version: YYMM.commits (e.g. 2604.161) -->
-  <Target Name="ComputeSkinTattooVersion" BeforeTargets="GetAssemblyVersion;GenerateNuspec;Build">
+  <Target Name="ComputeSkinTattooVersion" BeforeTargets="GetAssemblyVersion;GenerateNuspec;Build" Condition="'$(SkinTattooVersion)' == ''">
     <Exec Command="git rev-list --count HEAD" ConsoleToMsBuild="true" StandardOutputImportance="low">
       <Output TaskParameter="ConsoleOutput" PropertyName="GitCommitCount" />
     </Exec>
-    <PropertyGroup>
-      <SkinTattooVersion>$([System.DateTime]::UtcNow.ToString("yyMM")).$(GitCommitCount)</SkinTattooVersion>
-    </PropertyGroup>
+    <CreateProperty Value="$([System.DateTime]::UtcNow.ToString('yyMM')).$(GitCommitCount)">
+      <Output TaskParameter="Value" PropertyName="SkinTattooVersion" />
+    </CreateProperty>
+    <CreateProperty Value="$(SkinTattooVersion)">
+      <Output TaskParameter="Value" PropertyName="Version" />
+    </CreateProperty>
+    <CreateProperty Value="$(SkinTattooVersion)">
+      <Output TaskParameter="Value" PropertyName="AssemblyVersion" />
+    </CreateProperty>
+    <CreateProperty Value="$(SkinTattooVersion)">
+      <Output TaskParameter="Value" PropertyName="FileVersion" />
+    </CreateProperty>
   </Target>
 </Project>
