@@ -24,6 +24,7 @@ public class PenumbraBridge : IDisposable
     private const string TempModTag = "SkinTattooTemp";
 
     public bool IsAvailable { get; private set; }
+    public bool HasActiveRedirects { get; private set; }
 
     public PenumbraBridge(IDalamudPluginInterface pluginInterface, IPluginLog log)
     {
@@ -69,6 +70,7 @@ public class PenumbraBridge : IDisposable
         {
             var ec = addTempModAll.Invoke(TempModTag, redirects, string.Empty, 99);
             Http.DebugServer.AppendLog($"[PenumbraBridge] AddTemporaryModAll ({redirects.Count} paths): {ec}");
+            if (ec == PenumbraApiEc.Success) HasActiveRedirects = true;
             return ec == PenumbraApiEc.Success;
         }
         catch (Exception ex)
@@ -84,6 +86,7 @@ public class PenumbraBridge : IDisposable
         try
         {
             removeTempModAll.Invoke(TempModTag, 99);
+            HasActiveRedirects = false;
             Http.DebugServer.AppendLog("[PenumbraBridge] Cleared temp mod");
         }
         catch (Exception ex)

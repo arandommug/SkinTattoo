@@ -196,6 +196,7 @@ public partial class MainWindow
         var alloc = previewService.GetOrCreateAllocator(group);
         bool exhausted = alloc.AvailableSlots == 0 && layer.AllocatedRowPair < 0;
         bool pbrSupported = previewService.MaterialSupportsPbr(group);
+        bool skinShpkColorTableDetected = previewService.IsSkinShpkWithColorTable(group);
 
         if (!pbrSupported && !string.IsNullOrEmpty(group.MtrlGamePath))
         {
@@ -254,6 +255,8 @@ public partial class MainWindow
             onEnabled: () => previewService.InvalidateEmissiveForGroup(group),
             drawValue: () =>
             {
+                if (skinShpkColorTableDetected)
+                    ImGui.TextColored(new Vector4(1f, 0.5f, 0.3f, 1f), "当前 mod 修改了 skin.shpk + ColorTable，无法使用发光");
                 var emColor = layer.EmissiveColor;
                 if (ImGui.ColorEdit3("##emColor", ref emColor,
                     ImGuiColorEditFlags.NoLabel | ImGuiColorEditFlags.NoInputs))

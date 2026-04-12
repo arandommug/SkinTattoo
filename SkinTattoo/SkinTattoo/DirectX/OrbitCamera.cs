@@ -19,7 +19,10 @@ public class OrbitCamera
 
     public void SetAspect(float w, float h)
     {
-        aspect = w / Math.Max(h, 1f);
+        var newAspect = w / Math.Max(h, 1f);
+        if (Math.Abs(newAspect - aspect) < 1e-6f) return;
+        aspect = newAspect;
+        Update();
     }
 
     public void Update()

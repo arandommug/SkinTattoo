@@ -47,7 +47,7 @@ public partial class MainWindow
     private void DrawResourceWindow()
     {
         ImGui.SetNextWindowSize(new Vector2(680, 600), ImGuiCond.FirstUseEver);
-        if (!ImGui.Begin("添加贴花组###SkinTattooResources", ref resourceWindowOpen))
+        if (!ImGui.Begin("添加目标材质###SkinTattooResources", ref resourceWindowOpen))
         {
             ImGui.End();
             return;
@@ -106,7 +106,22 @@ public partial class MainWindow
 
         return cards.Values
             .Where(c => c.ShaderName is "skin" or "iris")
+            .Where(c => !IsUnusedBodyFallback(c))
             .ToList();
+    }
+
+    /// <summary>
+    /// Body skin materials must be referenced by at least one equipment model.
+    /// If only referenced by stub/fallback body models, the material belongs to
+    /// a different subrace variant (e.g. Raen material on a Xaela character)
+    /// and should be hidden from the card list.
+    /// </summary>
+    private static bool IsUnusedBodyFallback(MtrlCardInfo card)
+    {
+        if (!card.MtrlPaths.Any(p => p.Contains("/obj/body/")))
+            return false;
+        return !card.LiveMdls.Any(m =>
+            m.GamePath.StartsWith("chara/equipment/", StringComparison.OrdinalIgnoreCase));
     }
 
     private static void ScanForCards(
@@ -194,7 +209,7 @@ public partial class MainWindow
         else
         {
             if (ImGui.Button("添加"))
-                AddTargetGroupFromMtrl(card.FirstMtrlNode!, card.FirstParentMdl);
+                AddTargetGroupFromMtrl(card.FirstMtrlNode!, card.FirstParentMdl, card.LiveMdls);
         }
 
         ImGui.SameLine();
@@ -543,12 +558,19 @@ public partial class MainWindow
 
     // ── Selection logic ──────────────────────────────────────────────────────
 
-    private void AddTargetGroupFromMtrl(ResourceNodeDto mtrlNode, ResourceNodeDto? parentMdl)
+    private void AddTargetGroupFromMtrl(ResourceNodeDto mtrlNode, ResourceNodeDto? parentMdl,
+        List<(string GamePath, string ActualPath)>? liveMdls = null)
     {
-        previewService.ClearTextureCache();
-        previewService.ResetSwapState();
-        penumbra.ClearRedirect();
-        penumbra.RedrawPlayer();
+        // Only clear state and redraw when there are active Penumbra redirects.
+        // This avoids unnecessary character reloads (flash) when rapidly adding
+        // multiple groups before any preview has been triggered.
+        if (penumbra.HasActiveRedirects)
+        {
+            previewService.ClearTextureCache();
+            previewService.ResetSwapState();
+            penumbra.ClearRedirect();
+            penumbra.RedrawPlayer();
+        }
 
         var mtrlGp = mtrlNode.GamePath;
         if (string.IsNullOrEmpty(mtrlGp))
@@ -622,20 +644,37 @@ public partial class MainWindow
             previewService.NotifyMeshChanged();
             if (ModelEditorWindowRef != null) ModelEditorWindowRef.IsOpen = true;
         }
-        else if (parentMdl != null)
-        {
-            DebugServer.AppendLog("[MainWindow] resolver failed -> legacy parentMdl fallback");
-            tg.MeshGamePath = parentMdl.GamePath;
-            tg.MeshDiskPath = GetDiskPath(parentMdl);
-            tg.TargetMatIdx = [];
-            tg.MeshSlots = [];
-            previewService.LoadMesh(parentMdl.GamePath ?? GetDiskPath(parentMdl));
-            previewService.NotifyMeshChanged();
-            if (ModelEditorWindowRef != null) ModelEditorWindowRef.IsOpen = true;
-        }
         else
         {
-            DebugServer.AppendLog("[MainWindow] resolver failed and no fallback parentMdl  -- no mesh loaded");
+            // Resolver failed (non-standard mtrl filename like _bibo).
+            // Fall back to LiveMdls from the resource tree card, which already
+            // contains all mdl nodes that reference this material.
+            tg.TargetMatIdx = [];
+            tg.MeshSlots = [];
+            var mdlPaths = new List<string>();
+            if (liveMdls != null)
+            {
+                foreach (var (gp, ap) in liveMdls)
+                {
+                    var dp = Path.IsPathRooted(ap) ? ap : gp;
+                    if (!string.IsNullOrEmpty(dp) && !mdlPaths.Contains(dp))
+                        mdlPaths.Add(dp);
+                }
+            }
+            if (mdlPaths.Count == 0 && parentMdl != null)
+                mdlPaths.Add(GetDiskPath(parentMdl));
+
+            if (mdlPaths.Count > 0)
+            {
+                // Don't set MeshGamePath — LoadMeshForGroup checks it before
+                // AllMeshPaths and would load only a single model.
+                tg.MeshDiskPath = mdlPaths[0];
+                for (int i = 1; i < mdlPaths.Count; i++)
+                    tg.MeshDiskPaths.Add(mdlPaths[i]);
+                previewService.LoadMeshForGroup(tg);
+                previewService.NotifyMeshChanged();
+                if (ModelEditorWindowRef != null) ModelEditorWindowRef.IsOpen = true;
+            }
         }
 
         config.Save();

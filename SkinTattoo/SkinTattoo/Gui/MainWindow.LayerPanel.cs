@@ -22,7 +22,7 @@ public partial class MainWindow
             resourceWindowOpen = true;
             RefreshResources();
         }
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("添加贴花组");
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("添加目标材质");
 
         ImGui.SameLine();
         var io = ImGui.GetIO();
@@ -65,7 +65,7 @@ public partial class MainWindow
         }
 
         if (project.Groups.Count == 0)
-            ImGui.TextDisabled("点击 + 添加贴花组");
+            ImGui.TextDisabled("点击 + 添加目标材质");
     }
 
     private void DrawGroupCard(int gi)

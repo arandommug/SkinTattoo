@@ -1213,6 +1213,29 @@ public class PreviewService : IDisposable
         return !string.IsNullOrEmpty(GetIndexMapGamePath(group));
     }
 
+    /// <summary>
+    /// True when the group's .mtrl is a skin.shpk material with a non-standard
+    /// ColorTable (e.g. Eve "pores" face materials). Emissive preview will strip
+    /// the ColorTable to avoid rendering issues.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, bool> skinShpkCtCache = new(StringComparer.OrdinalIgnoreCase);
+
+    public bool IsSkinShpkWithColorTable(TargetGroup group)
+    {
+        if (string.IsNullOrEmpty(group.MtrlGamePath)) return false;
+        var mtrlDisk = group.OrigMtrlDiskPath ?? group.MtrlDiskPath;
+        if (string.IsNullOrEmpty(mtrlDisk) || !File.Exists(mtrlDisk)) return false;
+        if (skinShpkCtCache.TryGetValue(mtrlDisk, out var cached)) return cached;
+        try
+        {
+            var bytes = File.ReadAllBytes(mtrlDisk);
+            var result = HasSkinShpkColorTable(bytes);
+            skinShpkCtCache[mtrlDisk] = result;
+            return result;
+        }
+        catch { return false; }
+    }
+
     /// <summary>Reason codes for a failed row pair allocation, surfaced to the UI for toasting.</summary>
     public enum RowPairAllocFailure { None, Unsupported, Exhausted }
 
@@ -1483,7 +1506,9 @@ public class PreviewService : IDisposable
                 return false;
             }
 
-            if (group.HasEmissiveLayers() || group.HasPbrLayers())
+            var hasEmissiveLayers = group.HasEmissiveLayers();
+            var hasPbrLayers = group.HasPbrLayers() && MaterialSupportsPbr(group);
+            if (hasEmissiveLayers || hasPbrLayers)
             {
                 if (!string.IsNullOrEmpty(group.MtrlGamePath)
                     && !previewDiskPaths.ContainsKey(group.MtrlGamePath))
@@ -1513,7 +1538,7 @@ public class PreviewService : IDisposable
             }
 
             // v1 PBR (character.shpk path): index map must be mounted before inplace can fire
-            if (group.HasPbrLayers())
+            if (hasPbrLayers)
             {
                 var indexGamePath = GetIndexMapGamePath(group);
                 if (!string.IsNullOrEmpty(indexGamePath)
@@ -1581,11 +1606,11 @@ public class PreviewService : IDisposable
         // PBR-only or WholeMaterial-only groups produce no diffuse delta but still need the
         // material mounted for inplace ColorTable swap. Synthesize a passthrough by cloning
         // vanilla diffuse so the redirect pipeline can engage.
-        if (diffResult == null && group.HasPbrLayers())
+        if (diffResult == null && group.HasPbrLayers() && MaterialSupportsPbr(group))
         {
             diffResult = (byte[])baseTex.Data.Clone();
         }
-        if (diffPreview == null && group.HasPbrLayers())
+        if (diffPreview == null && group.HasPbrLayers() && MaterialSupportsPbr(group))
             diffPreview = (byte[])baseTex.Data.Clone();
 
         // 3D editor reads compositeResults  -- feed it the preview version.
@@ -1616,8 +1641,18 @@ public class PreviewService : IDisposable
 
         // Emissive / PBR: modify .mtrl, write emissive into norm.a (skin.shpk legacy path),
         // and mount index map for ColorTable PBR (character.shpk path).
+        // Only treat HasPbrLayers as needing mtrl modification when the material actually
+        // supports PBR (has g_SamplerIndex / ColorTable). skin.shpk materials have no
+        // ColorTable, so diffuse-only layers should NOT trigger mtrl shader key changes.
         var hasEmissive = group.HasEmissiveLayers();
-        var hasPbr = group.HasPbrLayers();
+        var hasPbr = group.HasPbrLayers() && MaterialSupportsPbr(group);
+
+        // Skip emissive mtrl/norm for incompatible materials (skin.shpk with
+        // non-standard ColorTable, e.g. Eve "pores"). The emissive shader
+        // variant is fundamentally incompatible with these materials.
+        if (hasEmissive && IsSkinShpkWithColorTable(group))
+            hasEmissive = false;
+
         if ((hasEmissive || hasPbr) && !string.IsNullOrEmpty(group.MtrlGamePath))
         {
             var emissiveColor = GetCombinedEmissiveColor(group.Layers);
@@ -2001,6 +2036,37 @@ public class PreviewService : IDisposable
             DebugServer.AppendLog($"[PreviewService] Emissive mtrl build failed: {ex.Message}");
             return false;
         }
+    }
+
+    /// <summary>
+    /// Quick binary check: is this a skin.shpk material with a non-zero DataSetSize?
+    /// Vanilla skin.shpk materials have DataSetSize=0. Mods like Eve add ColorTable
+    /// data for pore/glossy effects, which is incompatible with the emissive variant.
+    /// </summary>
+    private static bool HasSkinShpkColorTable(byte[] mtrlBytes)
+    {
+        if (mtrlBytes.Length < 16) return false;
+
+        // DataSetSize is the upper 16 bits of the uint32 at offset 4
+        int dataSetSize = mtrlBytes[6] | (mtrlBytes[7] << 8);
+        if (dataSetSize == 0) return false;
+
+        // Parse header to find shader package name in string table
+        int shpkNameOffset = mtrlBytes[10] | (mtrlBytes[11] << 8);
+        int texCount = mtrlBytes[12];
+        int uvCount = mtrlBytes[13];
+        int colorCount = mtrlBytes[14];
+
+        int stringsStart = 16 + texCount * 4 + uvCount * 4 + colorCount * 4;
+        int nameStart = stringsStart + shpkNameOffset;
+        if (nameStart >= mtrlBytes.Length) return false;
+
+        // Read null-terminated shader name
+        int end = nameStart;
+        while (end < mtrlBytes.Length && mtrlBytes[end] != 0) end++;
+        var shpkName = System.Text.Encoding.UTF8.GetString(mtrlBytes, nameStart, end - nameStart);
+
+        return shpkName == "skin.shpk";
     }
 
     private (byte[] Data, int Width, int Height)? LoadGameTexture(string gamePath)

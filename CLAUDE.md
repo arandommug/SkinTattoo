@@ -248,6 +248,8 @@ RayPicker (ray picking) → UV coordinates → DecalLayer.UvCenter → composite
 - Model selection from Penumbra resource tree list (not manual file dialog)
 - Model management popup supports visibility toggle and removal
 - Only loads meshes with `MaterialIdx == 0` (skips accessories/shadows etc.)
+- Resolver fallback: when `SkinMeshResolver` fails (non-standard mtrl filenames like `_bibo`), uses `LiveMdls` from resource tree card to collect all mdl disk paths. Does NOT set `MeshGamePath` (would override `AllMeshPaths` in `LoadMeshForGroup`).
+- "重新解析" preserves manually added `MeshDiskPaths` not covered by resolver results
 
 ### Controls
 | Input | Action |
