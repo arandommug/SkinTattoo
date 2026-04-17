@@ -38,6 +38,12 @@ public enum ClipMode
     ClipBottom,
 }
 
+public enum EmissiveAnimMode
+{
+    None = 0,
+    Pulse = 1,
+}
+
 public class DecalLayer
 {
     public LayerKind Kind { get; set; } = LayerKind.Decal;
@@ -65,6 +71,9 @@ public class DecalLayer
     public Vector3 SpecularColor { get; set; } = new(1f, 1f, 1f);
     public Vector3 EmissiveColor { get; set; } = new(1f, 1f, 1f);
     public float EmissiveIntensity { get; set; } = 1.0f;
+    public EmissiveAnimMode AnimMode { get; set; } = EmissiveAnimMode.None;
+    public float AnimSpeed { get; set; } = 1.0f;
+    public float AnimAmplitude { get; set; } = 0.5f;
     public float Roughness { get; set; } = 0.5f;
     public float Metalness { get; set; } = 0f;
     public float SheenRate { get; set; } = 0.1f;

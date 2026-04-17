@@ -25,6 +25,9 @@ public class SavedLayer
     public float EmissiveColorG { get; set; } = 1f;
     public float EmissiveColorB { get; set; } = 1f;
     public float EmissiveIntensity { get; set; } = 1f;
+    public int AnimMode { get; set; } = 0;
+    public float AnimSpeed { get; set; } = 1f;
+    public float AnimAmplitude { get; set; } = 0.5f;
     public int EmissiveMask { get; set; }
     public float EmissiveMaskFalloff { get; set; } = 0.5f;
     public float GradientAngleDeg { get; set; }

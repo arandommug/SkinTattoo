@@ -133,6 +133,9 @@
     "range": "范围",
     "offset": "偏移",
     "intensity": "强度",
+    "anim_mode": "动画",
+    "speed": "速度",
+    "amplitude": "幅度",
     "mask_preview": "遮罩预览:",
     "mask_label": "遮罩",
     "effect_label": "效果",
@@ -176,6 +179,10 @@
     "copy_material_path": "复制材质路径",
     "copy_game_path": "复制游戏路径",
     "copy_actual_path": "复制实际路径"
+  },
+  "anim": {
+    "none": "无",
+    "pulse": "脉冲"
   },
   "enum": {
     "blendmode": {

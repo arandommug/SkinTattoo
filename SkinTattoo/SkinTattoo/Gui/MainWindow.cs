@@ -729,7 +729,7 @@ public partial class MainWindow : Window, IDisposable
         var charBase = previewService.GetCharacterBase();
         if (charBase == null) return;
 
-        // skin CT: rebuild per-layer CT from current layer state.
+        // skin CT: rebuild per-layer CT from current layer state (includes per-layer animation).
         // Do NOT fall through to HighlightEmissiveColor — it would overwrite
         // per-layer colors with a single combined color.
         if (previewService.RestoreSkinCtAfterHighlight(charBase, group))

@@ -572,6 +572,9 @@ public class PreviewService : IDisposable
                     AllocatedRowPair = l.AllocatedRowPair,
                     EmissiveColor = isTarget ? color : l.EmissiveColor,
                     EmissiveIntensity = isTarget ? 1f : l.EmissiveIntensity,
+                    AnimMode = l.AnimMode,
+                    AnimSpeed = l.AnimSpeed,
+                    AnimAmplitude = l.AnimAmplitude,
                 });
             }
             if (tempLayers.Count == 0) return;
@@ -1068,6 +1071,8 @@ public class PreviewService : IDisposable
         public float FadeMaskFalloff;
         public Vector3 DiffuseColor, SpecularColor, EmissiveColor;
         public float EmissiveIntensity;
+        public EmissiveAnimMode AnimMode;
+        public float AnimSpeed, AnimAmplitude;
         public float Roughness, Metalness, SheenRate, SheenTint, SheenAperture;
         public float GradientAngleDeg;
         public float GradientScale;
@@ -1085,6 +1090,7 @@ public class PreviewService : IDisposable
             FadeMask = l.FadeMask; FadeMaskFalloff = l.FadeMaskFalloff;
             DiffuseColor = l.DiffuseColor; SpecularColor = l.SpecularColor;
             EmissiveColor = l.EmissiveColor; EmissiveIntensity = l.EmissiveIntensity;
+            AnimMode = l.AnimMode; AnimSpeed = l.AnimSpeed; AnimAmplitude = l.AnimAmplitude;
             Roughness = l.Roughness; Metalness = l.Metalness;
             SheenRate = l.SheenRate; SheenTint = l.SheenTint; SheenAperture = l.SheenAperture;
             GradientAngleDeg = l.GradientAngleDeg; GradientScale = l.GradientScale;
@@ -1116,6 +1122,9 @@ public class PreviewService : IDisposable
             SpecularColor = SpecularColor,
             EmissiveColor = EmissiveColor,
             EmissiveIntensity = EmissiveIntensity,
+            AnimMode = AnimMode,
+            AnimSpeed = AnimSpeed,
+            AnimAmplitude = AnimAmplitude,
             Roughness = Roughness,
             Metalness = Metalness,
             SheenRate = SheenRate,

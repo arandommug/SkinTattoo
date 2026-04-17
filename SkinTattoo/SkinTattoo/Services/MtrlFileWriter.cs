@@ -295,11 +295,15 @@ public static class MtrlFileWriter
             if (!layer.IsVisible || !layer.AffectsEmissive || layer.AllocatedRowPair < 0) continue;
             int rowLower = layer.AllocatedRowPair * 2;
             var em = layer.EmissiveColor * layer.EmissiveIntensity;
+            float animSpeed = layer.AnimMode == Core.EmissiveAnimMode.Pulse ? layer.AnimSpeed : 0f;
+            float animAmp   = layer.AnimMode == Core.EmissiveAnimMode.Pulse ? layer.AnimAmplitude : 0f;
             for (int r = 0; r < 2; r++)
             {
-                WriteHalf(rowLower + r, 8, em.X);
-                WriteHalf(rowLower + r, 9, em.Y);
+                WriteHalf(rowLower + r, 8,  em.X);
+                WriteHalf(rowLower + r, 9,  em.Y);
                 WriteHalf(rowLower + r, 10, em.Z);
+                WriteHalf(rowLower + r, 12, animSpeed);
+                WriteHalf(rowLower + r, 13, animAmp);
             }
         }
 

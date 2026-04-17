@@ -67,7 +67,7 @@ public static class SkinShpkPatcher
             }
 
             var result = RebuildShpk(shpk);
-            Log($"Patched skin.shpk: {vanillaShpk.Length} -> {result.Length} bytes, PS patched {success}/{LightingPsIndices.Length} (skipped {skipped})");
+            Log($"Patched skin.shpk: {vanillaShpk.Length} -> {result.Length} bytes, PS patched {success}/{LightingPsIndices.Length} (skipped {skipped}) [anim-v3 per-layer]");
 
             DumpNodeSelectorTable(shpk);
 
@@ -125,7 +125,24 @@ public static class SkinShpkPatcher
             return false;
         }
 
-        var patchedDxbc = RebuildDxbc(originalDxbc, withReplacement);
+        // Stage 0: extend CB0 dcl from [18] to [20] so animation params at cb0[19] are readable.
+        var withCb0Ext = PatchShexExtendCb0(withReplacement, 20);
+        if (withCb0Ext == null)
+        {
+            Log($"PS[{psIndex}] CB0 dcl not found");
+            return false;
+        }
+
+        // Stage 1: inject pulse modulation `r0.xyz *= 1 + amp * sin(2pi * speed * LoopTime)`
+        // before the final `mul o0.xyz, r0.xyzx, cb1[3].xxxx` output instruction.
+        var withPulse = PatchShexInjectPulseModulation(withCb0Ext);
+        if (withPulse == null)
+        {
+            Log($"PS[{psIndex}] output mul not found, skip pulse injection");
+            withPulse = withCb0Ext;
+        }
+
+        var patchedDxbc = RebuildDxbc(originalDxbc, withPulse);
 
         int oldSize = ps.BlobSz;
         int newSize = patchedDxbc.Length;
@@ -431,6 +448,96 @@ public static class SkinShpkPatcher
         BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(4), (uint)(oldCount + tokenDelta));
 
         return result;
+    }
+
+    // Anchor: the ColorTable sample instruction inserted by PatchShexReplaceEmissive.
+    // `sample_indexable(texture2d)(float4) r1.xyzw, r1.xyxx, t10.xyzw, s5` (11 tokens, 44 bytes).
+    // After this instruction, r1.xyz holds the per-layer emissive color and is consumed by
+    // `mul r1.xyz, r1.xyzx, cb5[0].xyzx` (g_MaterialParameterDynamic.m_EmissiveColor) at the
+    // end of the shader — exactly the "emissive contribution only" vector we want to modulate.
+    private static readonly byte[] EmissiveSampleAnchor = ToLeBytes(
+        0x8B000045, 0x800000C2, 0x00155543,
+        0x001000F2, 0x00000001,
+        0x00100046, 0x00000001,
+        0x00107E46, 0x0000000A,
+        0x00106000, 0x00000005);
+
+    // Pulse modulation payload: 8 instructions, 62 tokens, 248 bytes.
+    // Samples a SECOND ColorTable column (U=0.4375 = column 3 = halfs 12..15) to get
+    // per-layer speed / amplitude; the first sample (U=0.3125) already gave us emissive.
+    // Inserted DIRECTLY AFTER the emissive sample. r9 and r2 are scratch (r2 is overwritten
+    // a few instructions later by the original shader so collision is safe).
+    //
+    //   mov    r9.x, l(0.4375)                      ; U for animation column
+    //   mad    r9.y, r0.z, l(0.9375), l(0.015625)   ; V from normal.alpha (same formula as emissive sample)
+    //   sample r2.xyzw, r9.xyxx, t10, s5            ; r2.x=speed, r2.y=amp
+    //   mul    r9.x, r2.x, cb2[0].x                 ; phase = speed * m_LoopTime
+    //   mul    r9.x, r9.x, l(6.283185)              ; *2pi
+    //   sincos r9.x, null, r9.x                     ; sin(phase)
+    //   mad    r9.x, r2.y, r9.x, l(1.0)             ; k = amp*sin + 1
+    //   mul    r1.xyz, r1.xyzx, r9.xxxx             ; emissive *= k
+    private static readonly byte[] PulsePayload = ToLeBytes(
+        0x05000036, 0x00100012, 0x00000009, 0x00004001, 0x3EE00000,
+        0x09000032, 0x00100022, 0x00000009, 0x0010002A, 0x00000000, 0x00004001, 0x3F700000, 0x00004001, 0x3C800000,
+        0x8B000045, 0x800000C2, 0x00155543, 0x001000F2, 0x00000002, 0x00100046, 0x00000009, 0x00107E46, 0x0000000A, 0x00106000, 0x00000005,
+        0x08000038, 0x00100012, 0x00000009, 0x0010000A, 0x00000002, 0x0020800A, 0x00000002, 0x00000000,
+        0x07000038, 0x00100012, 0x00000009, 0x0010000A, 0x00000009, 0x00004001, 0x40C90FDA,
+        0x0600004D, 0x00100012, 0x00000009, 0x0000D000, 0x0010000A, 0x00000009,
+        0x09000032, 0x00100012, 0x00000009, 0x0010001A, 0x00000002, 0x0010000A, 0x00000009, 0x00004001, 0x3F800000,
+        0x07000038, 0x00100072, 0x00000001, 0x00100246, 0x00000001, 0x00100006, 0x00000009);
+
+    /// <summary>Insert pulse modulation payload after the ColorTable sample instruction
+    /// so only the emissive term (r1.xyz) gets modulated.</summary>
+    private static byte[]? PatchShexInjectPulseModulation(byte[] shexData)
+    {
+        int idx = FindPattern(shexData, EmissiveSampleAnchor);
+        if (idx < 0) return null;
+        int insertAt = idx + EmissiveSampleAnchor.Length;
+
+        int payloadTokens = PulsePayload.Length / 4;
+        var result = new byte[shexData.Length + PulsePayload.Length];
+        shexData.AsSpan(0, insertAt).CopyTo(result);
+        PulsePayload.CopyTo(result.AsSpan(insertAt));
+        shexData.AsSpan(insertAt).CopyTo(result.AsSpan(insertAt + PulsePayload.Length));
+
+        uint oldCount = BinaryPrimitives.ReadUInt32LittleEndian(result.AsSpan(4));
+        BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(4), (uint)(oldCount + payloadTokens));
+        return result;
+    }
+
+    /// <summary>Find the dcl_constantbuffer for CB0 and bump its array size to newSize.
+    /// In-place modification (no byte count change, no token count update needed).</summary>
+    private static byte[]? PatchShexExtendCb0(byte[] shexData, int newSize)
+    {
+        int pos = 8;
+        while (pos + 16 <= shexData.Length)
+        {
+            uint opcodeToken = BinaryPrimitives.ReadUInt32LittleEndian(shexData.AsSpan(pos));
+            int opcode = (int)(opcodeToken & 0x7FF);
+            int length = (int)((opcodeToken >> 24) & 0x7F);
+            if (length == 0) length = 1;
+
+            if (opcode < 0x58 || opcode > 0x6A) break;
+
+            if (opcode == 0x59 && length == 4)
+            {
+                uint cbReg = BinaryPrimitives.ReadUInt32LittleEndian(shexData.AsSpan(pos + 8));
+                if (cbReg == 0)
+                {
+                    uint currentSize = BinaryPrimitives.ReadUInt32LittleEndian(shexData.AsSpan(pos + 12));
+                    if (currentSize >= (uint)newSize)
+                    {
+                        Log($"CB0 dcl already >= {newSize} (current={currentSize})");
+                        return shexData;
+                    }
+                    var result = (byte[])shexData.Clone();
+                    BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(pos + 12), (uint)newSize);
+                    return result;
+                }
+            }
+            pos += length * 4;
+        }
+        return null;
     }
 
     // ── SHPK Parse/Rebuild ──────────────────────────────────────────────

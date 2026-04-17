@@ -133,6 +133,9 @@
     "range": "Range",
     "offset": "Offset",
     "intensity": "Intensity",
+    "anim_mode": "Anim",
+    "speed": "Speed",
+    "amplitude": "Amp",
     "mask_preview": "Mask Preview:",
     "mask_label": "Mask",
     "effect_label": "Effect",
@@ -176,6 +179,10 @@
     "copy_material_path": "Copy Material Path",
     "copy_game_path": "Copy Game Path",
     "copy_actual_path": "Copy Actual Path"
+  },
+  "anim": {
+    "none": "None",
+    "pulse": "Pulse"
   },
   "enum": {
     "blendmode": {

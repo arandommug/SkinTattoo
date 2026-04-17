@@ -239,6 +239,32 @@ public partial class MainWindow
                 var emI = layer.EmissiveIntensity;
                 if (ImGui.DragFloat("##emI", ref emI, 0.05f, 0.1f, 10f, "%.2f"))
                 { layer.EmissiveIntensity = emI; MarkPreviewDirty(); TryDirectEmissiveUpdate(group); }
+
+                ImGui.AlignTextToFramePadding(); ImGui.TextDisabled(Strings.T("label.anim_mode")); ImGui.SameLine();
+                ImGui.SetNextItemWidth(80f);
+                var animIdx = (int)layer.AnimMode;
+                var animNames = new[] { Strings.T("anim.none"), Strings.T("anim.pulse") };
+                if (ImGui.Combo("##animMode", ref animIdx, animNames, animNames.Length))
+                {
+                    layer.AnimMode = (EmissiveAnimMode)animIdx;
+                    MarkPreviewDirty();
+                    TryDirectEmissiveUpdate(group);
+                }
+                if (layer.AnimMode == EmissiveAnimMode.Pulse)
+                {
+                    ImGui.SameLine();
+                    ImGui.TextDisabled(Strings.T("label.speed")); ImGui.SameLine();
+                    ImGui.SetNextItemWidth(-1);
+                    var sp = layer.AnimSpeed;
+                    if (ImGui.DragFloat("##animSpeed", ref sp, 0.05f, 0.05f, 10f, "%.2f Hz"))
+                    { layer.AnimSpeed = sp; MarkPreviewDirty(); TryDirectEmissiveUpdate(group); }
+
+                    ImGui.AlignTextToFramePadding(); ImGui.TextDisabled(Strings.T("label.amplitude")); ImGui.SameLine();
+                    ImGui.SetNextItemWidth(-1);
+                    var am = layer.AnimAmplitude;
+                    if (ImGui.SliderFloat("##animAmp", ref am, 0f, 1f, "%.2f"))
+                    { layer.AnimAmplitude = am; MarkPreviewDirty(); TryDirectEmissiveUpdate(group); }
+                }
             }
         }
 

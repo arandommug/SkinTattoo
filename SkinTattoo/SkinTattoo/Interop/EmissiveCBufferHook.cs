@@ -417,7 +417,6 @@ public unsafe class EmissiveCBufferHook : IDisposable
             return cached;
 
         int result = -1;
-
         var shpkHandle = mrh->ShaderPackageResourceHandle;
         if (shpkHandle != null)
         {
@@ -431,13 +430,12 @@ public unsafe class EmissiveCBufferHook : IDisposable
                     {
                         result = elements[i].Offset;
                         DebugServer.AppendLog(
-                            $"[EmissiveHook] Found g_EmissiveColor via ShaderPackage: offset={result} size={elements[i].Size}");
+                            $"[EmissiveHook] Found g_EmissiveColor: offset={result} size={elements[i].Size}");
                         break;
                     }
                 }
             }
         }
-
         offsetCache[key] = result;
         return result;
     }
