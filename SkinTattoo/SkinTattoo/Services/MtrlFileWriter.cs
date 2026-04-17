@@ -295,12 +295,18 @@ public static class MtrlFileWriter
             if (!layer.IsVisible || !layer.AffectsEmissive || layer.AllocatedRowPair < 0) continue;
             int rowLower = layer.AllocatedRowPair * 2;
             var em = layer.EmissiveColor * layer.EmissiveIntensity;
-            bool hasAnim = layer.AnimMode == Core.EmissiveAnimMode.Pulse
-                           || layer.AnimMode == Core.EmissiveAnimMode.Flicker;
+            bool hasAnim = layer.AnimMode != Core.EmissiveAnimMode.None;
             float animSpeed = hasAnim ? layer.AnimSpeed : 0f;
             float animAmp   = hasAnim ? layer.AnimAmplitude : 0f;
-            // mode sentinel for the DXBC pulse-vs-flicker branch: pulse=0, flicker=1.
-            float animMode  = layer.AnimMode == Core.EmissiveAnimMode.Flicker ? 1f : 0f;
+            // mode sentinel for DXBC branch selection: 0=pulse, 1=flicker, 2=gradient.
+            float animMode = layer.AnimMode switch
+            {
+                Core.EmissiveAnimMode.Flicker => 1f,
+                Core.EmissiveAnimMode.Gradient => 2f,
+                _ => 0f,
+            };
+            // Gradient second color (scaled by intensity for consistent brightness).
+            var emB = layer.EmissiveColorB * layer.EmissiveIntensity;
             for (int r = 0; r < 2; r++)
             {
                 WriteHalf(rowLower + r, 8,  em.X);
@@ -309,6 +315,10 @@ public static class MtrlFileWriter
                 WriteHalf(rowLower + r, 12, animSpeed);
                 WriteHalf(rowLower + r, 13, animAmp);
                 WriteHalf(rowLower + r, 14, animMode);
+                // halfs 17/18/19 = colorB RGB (half 16 = vanilla roughness, must not touch).
+                WriteHalf(rowLower + r, 17, emB.X);
+                WriteHalf(rowLower + r, 18, emB.Y);
+                WriteHalf(rowLower + r, 19, emB.Z);
             }
         }
 

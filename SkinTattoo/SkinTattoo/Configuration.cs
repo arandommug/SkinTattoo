@@ -28,6 +28,10 @@ public class SavedLayer
     public int AnimMode { get; set; } = 0;
     public float AnimSpeed { get; set; } = 1f;
     public float AnimAmplitude { get; set; } = 0.5f;
+    // Gradient second color (default = blue, to visually differ from the primary emissive)
+    public float EmissiveColorB_R { get; set; } = 0f;
+    public float EmissiveColorB_G { get; set; } = 0f;
+    public float EmissiveColorB_B { get; set; } = 1f;
     public int EmissiveMask { get; set; }
     public float EmissiveMaskFalloff { get; set; } = 0.5f;
     public float GradientAngleDeg { get; set; }

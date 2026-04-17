@@ -136,6 +136,7 @@
     "anim_mode": "Anim",
     "speed": "Speed",
     "amplitude": "Amp",
+    "color_b": "Color B",
     "mask_preview": "Mask Preview:",
     "mask_label": "Mask",
     "effect_label": "Effect",
@@ -183,7 +184,8 @@
   "anim": {
     "none": "None",
     "pulse": "Pulse",
-    "flicker": "Flicker"
+    "flicker": "Flicker",
+    "gradient": "Gradient"
   },
   "enum": {
     "blendmode": {

@@ -43,6 +43,7 @@ public enum EmissiveAnimMode
     None = 0,
     Pulse = 1,
     Flicker = 2,
+    Gradient = 3,
 }
 
 public class DecalLayer
@@ -75,6 +76,7 @@ public class DecalLayer
     public EmissiveAnimMode AnimMode { get; set; } = EmissiveAnimMode.None;
     public float AnimSpeed { get; set; } = 1.0f;
     public float AnimAmplitude { get; set; } = 0.5f;
+    public Vector3 EmissiveColorB { get; set; } = new(0f, 0f, 1f);
     public float Roughness { get; set; } = 0.5f;
     public float Metalness { get; set; } = 0f;
     public float SheenRate { get; set; } = 0.1f;

@@ -258,7 +258,7 @@ public class PreviewService : IDisposable
 
     private record SwapBatchEntry(string GamePath, string? DiskPath, byte[] BgraData, int Width, int Height);
     private record EmissiveEntry(string MtrlGamePath, string? MtrlDiskPath, Vector3 Color, int CBufferOffset,
-        EmissiveAnimMode AnimMode, float AnimSpeed, float AnimAmplitude);
+        EmissiveAnimMode AnimMode, float AnimSpeed, float AnimAmplitude, Vector3 GradientColorB);
     private record ColorTableEntry(string MtrlGamePath, string? MtrlDiskPath, Half[] Data, int Width, int Height);
     private record SwapBatch(List<SwapBatchEntry> Textures, List<EmissiveEntry> Emissives, List<ColorTableEntry> ColorTables);
 
@@ -550,7 +550,7 @@ public class PreviewService : IDisposable
             // the user to wiggle a slider. The hook itself dedupes internally.
             if (emissiveHook != null && em.CBufferOffset > 0)
                 emissiveHook.SetTargetByPath(charBase, em.MtrlGamePath, em.MtrlDiskPath, em.Color,
-                    em.AnimMode, em.AnimSpeed, em.AnimAmplitude);
+                    em.AnimMode, em.AnimSpeed, em.AnimAmplitude, em.GradientColorB);
 
             if (isDup) continue;
             lastAppliedEmissive[em.MtrlGamePath] = key;
@@ -585,9 +585,9 @@ public class PreviewService : IDisposable
             if (!group.HasEmissiveLayers()) continue;
 
             var color = GetCombinedEmissiveColor(group.Layers);
-            var (mode, speed, amp) = GetDominantEmissiveAnim(group.Layers);
+            var (mode, speed, amp, colorB) = GetDominantEmissiveAnim(group.Layers);
             var mtrlDisk = previewMtrlDiskPaths.GetValueOrDefault(group.MtrlGamePath!);
-            emissiveHook.SetTargetByPath(charBase, group.MtrlGamePath!, mtrlDisk, color, mode, speed, amp);
+            emissiveHook.SetTargetByPath(charBase, group.MtrlGamePath!, mtrlDisk, color, mode, speed, amp, colorB);
         }
     }
 
@@ -617,6 +617,7 @@ public class PreviewService : IDisposable
                     IsVisible = true, AffectsEmissive = true,
                     AllocatedRowPair = l.AllocatedRowPair,
                     EmissiveColor = isTarget ? color : l.EmissiveColor,
+                    EmissiveColorB = l.EmissiveColorB,
                     EmissiveIntensity = isTarget ? 1f : l.EmissiveIntensity,
                     AnimMode = l.AnimMode,
                     AnimSpeed = l.AnimSpeed,
@@ -635,9 +636,9 @@ public class PreviewService : IDisposable
         textureSwap.UpdateEmissiveViaColorTable(charBase, group.MtrlGamePath!, mtrlDiskPath, color);
         if (emissiveHook != null && cbufOffset > 0)
         {
-            var (animMode, animSpeed, animAmp) = GetDominantEmissiveAnim(group.Layers);
+            var (animMode, animSpeed, animAmp, animColorB) = GetDominantEmissiveAnim(group.Layers);
             emissiveHook.SetTargetByPath(charBase, group.MtrlGamePath!, mtrlDiskPath, color,
-                animMode, animSpeed, animAmp);
+                animMode, animSpeed, animAmp, animColorB);
         }
     }
 
@@ -1060,9 +1061,9 @@ public class PreviewService : IDisposable
                         {
                             var mtrlDisk = previewMtrlDiskPaths.GetValueOrDefault(job.MtrlGamePath!);
                             emissiveOffsets.TryGetValue(job.MtrlGamePath!, out var emOff);
-                            var (animMode, animSpeed, animAmp) = GetDominantEmissiveAnim(layers);
+                            var (animMode, animSpeed, animAmp, animColorB) = GetDominantEmissiveAnim(layers);
                             emEntries.Add(new EmissiveEntry(job.MtrlGamePath!, mtrlDisk, job.EmissiveColor, emOff,
-                                animMode, animSpeed, animAmp));
+                                animMode, animSpeed, animAmp, animColorB));
                         }
                     }
 
@@ -1121,7 +1122,7 @@ public class PreviewService : IDisposable
         public ClipMode Clip;
         public LayerFadeMask FadeMask;
         public float FadeMaskFalloff;
-        public Vector3 DiffuseColor, SpecularColor, EmissiveColor;
+        public Vector3 DiffuseColor, SpecularColor, EmissiveColor, EmissiveColorB;
         public float EmissiveIntensity;
         public EmissiveAnimMode AnimMode;
         public float AnimSpeed, AnimAmplitude;
@@ -1141,7 +1142,7 @@ public class PreviewService : IDisposable
             Clip = l.Clip;
             FadeMask = l.FadeMask; FadeMaskFalloff = l.FadeMaskFalloff;
             DiffuseColor = l.DiffuseColor; SpecularColor = l.SpecularColor;
-            EmissiveColor = l.EmissiveColor; EmissiveIntensity = l.EmissiveIntensity;
+            EmissiveColor = l.EmissiveColor; EmissiveColorB = l.EmissiveColorB; EmissiveIntensity = l.EmissiveIntensity;
             AnimMode = l.AnimMode; AnimSpeed = l.AnimSpeed; AnimAmplitude = l.AnimAmplitude;
             Roughness = l.Roughness; Metalness = l.Metalness;
             SheenRate = l.SheenRate; SheenTint = l.SheenTint; SheenAperture = l.SheenAperture;
@@ -1173,6 +1174,7 @@ public class PreviewService : IDisposable
             DiffuseColor = DiffuseColor,
             SpecularColor = SpecularColor,
             EmissiveColor = EmissiveColor,
+            EmissiveColorB = EmissiveColorB,
             EmissiveIntensity = EmissiveIntensity,
             AnimMode = AnimMode,
             AnimSpeed = AnimSpeed,
@@ -2636,15 +2638,15 @@ public class PreviewService : IDisposable
     // Picks the first visible emissive layer's animation params. For single-layer groups
     // (iris etc.) this is exact; for legacy multi-layer skin fallbacks it is a best-effort
     // approximation — skin.shpk CT path handles per-layer anim directly and does not reach here.
-    private static (EmissiveAnimMode Mode, float Speed, float Amp) GetDominantEmissiveAnim(List<DecalLayer> layers)
+    private static (EmissiveAnimMode Mode, float Speed, float Amp, Vector3 ColorB) GetDominantEmissiveAnim(List<DecalLayer> layers)
     {
         foreach (var l in layers)
         {
             if (!l.IsVisible || !l.AffectsEmissive || string.IsNullOrEmpty(l.ImagePath)) continue;
             if (l.AnimMode == EmissiveAnimMode.None) continue;
-            return (l.AnimMode, l.AnimSpeed, l.AnimAmplitude);
+            return (l.AnimMode, l.AnimSpeed, l.AnimAmplitude, l.EmissiveColorB * l.EmissiveIntensity);
         }
-        return (EmissiveAnimMode.None, 0f, 0f);
+        return (EmissiveAnimMode.None, 0f, 0f, Vector3.Zero);
     }
 
     private bool TryBuildEmissiveMtrlWithColorTable(string mtrlPath, string outputPath,
@@ -2805,9 +2807,9 @@ public class PreviewService : IDisposable
 
         if (patchedSkinShpkPath == null || !File.Exists(patchedSkinShpkPath))
         {
-            // v2 suffix invalidates cached v1 shpk (62-token pulse-only payload) so the
-            // 94-token pulse+flicker payload gets regenerated after a plugin update.
-            var candidate = Path.Combine(outputDir, "skin_ct_v2.shpk");
+            // v4: fixes two DXBC encoding bugs in v3 gradient payload
+            // (mov opcode len byte + r3.yzwy swizzle encoding) that crashed GPU.
+            var candidate = Path.Combine(outputDir, "skin_ct_v4.shpk");
             if (!File.Exists(candidate))
             {
                 // Runtime patch: read vanilla skin.shpk from SqPack and patch in memory

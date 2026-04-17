@@ -97,21 +97,35 @@ cbuffer g_PbrParameterCommon
 **已知限制**：
 - **眼睛（iris.shpk）不支持**：iris 材质走独立的 iris.shpk 且走 CBuffer 发光路径（g_EmissiveColor + g_IrisRingEmissiveIntensity），本阶段未 patch iris.shpk，眼睛无 pulse 动画。未来若需：需为 iris.shpk 做类似 DXBC 注入 + ColorTable 化改造。
 
-### 阶段 2：Flicker 闪烁（未实施）
-**目标**：随机闪烁，类似坏灯泡／电光效果。
+### 阶段 2：Flicker 闪烁（已完成 2026-04-17）
+**目标**：方波闪烁，类似坏灯泡／电光效果。
 
-实现思路（ColorTable 方案续）：
-- 每层 mode 字段（0=Pulse, 1=Flicker, ...）存到 CT row column 3 的第 3 个 half（.z）
-- Flicker 公式：`k = 1 + amp * (frac(sin(floor(speed*t)) * 43758.5453) - 0.5) * 2`
-- DXBC 分支：`if_nz mode == 1` → flicker 路径；else pulse 路径（使用 `movc` 避免真分支）
+实现：
+- 公式简化为 `k = 1 + amp * sign(sin(2π·speed·t))` — 二值方波，duty 50%
+- DXBC 在 sincos 后插入 4 条指令：`ge → movc → ge → movc`，把 sin 值条件替换为 `±1`
+- CT col 3 half 14 = mode（0=Pulse, 1=Flicker）；根据 mode >= 0.5 做 `movc` 选择 wave
+- payload 从 62 token 扩到 94 token
+- iris.shpk 路径复用 `EmissiveCBufferHook.ComputeModulatedColor`：`s >= 0 ? +1 : -1`
+- shpk 缓存文件名 `skin_ct_v2.shpk` 强制重生
 
-新增 ColorTable 槽位：
-- half 14 = mode (float 强转)
-- half 15 = 备用（flicker 子参数如 duty cycle）
+### 阶段 3：Gradient 双色渐变（已完成 2026-04-18）
+**目标**：两个颜色之间按 sin 周期性 lerp，实现双色呼吸。
 
-**退出条件**：切换模式枚举 → Pulse/Flicker 切换生效，频率稳定不周期可辨。
+实现：
+- 公式 `final = lerp(colorA, colorB, 0.5 + 0.5*amp*sin(2π·speed·t))`
+- amp 控制插值幅度：amp=1 两色完全来回；amp=0 保持 colorA
+- DXBC 扩展：
+  - sincos 后新增 `mov r7.w, r9.x` 备份 sin（给 Gradient 用，pulse/flicker 会 clobber r9.x）
+  - pulse/flicker 乘法前 `mov r7.xyz, r1.xyzx` 备份 colorA
+  - 乘法后新加 9 条指令：采样 col 4 到 r3 → 计算 mix → lerp → 3-component movc 选最终结果
+  - payload 从 94 token 扩到 171 token
+- CT col 3 half 14 = mode (0=Pulse, 1=Flicker, 2=Gradient)
+- CT col 4 halfs 17/18/19 = colorB RGB（half 16 保留给 vanilla roughness 不动）
+- iris.shpk 路径 `ComputeModulatedColor` 增加 Gradient 分支，用 `Vector3.Lerp`
+- DecalLayer 新增 `EmissiveColorB` 字段（默认蓝色）
+- shpk 缓存文件名 `skin_ct_v3.shpk` 强制重生
 
-### 阶段 3：Ripple 水波纹（未实施）
+### 阶段 3（旧编号）：Ripple 水波纹（未实施）
 **目标**：从中心扩散的同心圆波纹。
 
 实现思路：
@@ -195,5 +209,7 @@ C# 侧注入流程（`PatchSinglePs`）按以下顺序串联：
 | 0 — 基础设施 | ✅ 2026-04-17 | CB0 dcl [18]→[20]，零视觉影响 |
 | 1 — Pulse | ✅ 2026-04-17 | 每层独立 via ColorTable column 3 |
 | 2 — Flicker | 未实施 | 按 ColorTable 方案可增量扩展 |
-| 3 — Ripple | 未实施 | 需要 mode 字段 + 距离计算 |
+| 2 — Flicker | ✅ 2026-04-17 | sin → sign 方波，DXBC +32 tokens，iris 同步支持 |
+| 3 — Gradient | ✅ 2026-04-18 | 双色 lerp，CT col 4 存 colorB，DXBC +77 tokens |
 | 4 — Iris pulse | ✅ 2026-04-17 | 路线 4B：EmissiveCBufferHook + Stopwatch 实时调制 |
+| 5 — Ripple | 未实施 | 需要 UV 距离场 + 位置参数 |

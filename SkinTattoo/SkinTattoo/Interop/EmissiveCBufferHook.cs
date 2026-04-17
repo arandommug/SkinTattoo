@@ -29,6 +29,7 @@ public unsafe class EmissiveCBufferHook : IDisposable
     private struct TargetData
     {
         public Vector3 BaseColor;
+        public Vector3 GradientColorB;
         public EmissiveAnimMode AnimMode;
         public float AnimSpeed;
         public float AnimAmplitude;
@@ -94,7 +95,8 @@ public unsafe class EmissiveCBufferHook : IDisposable
         FFXIVClientStructs.FFXIV.Client.Graphics.Scene.CharacterBase* charBase,
         string mtrlGamePath, string? mtrlDiskPath, Vector3 emissiveColor,
         EmissiveAnimMode animMode = EmissiveAnimMode.None,
-        float animSpeed = 0f, float animAmplitude = 0f)
+        float animSpeed = 0f, float animAmplitude = 0f,
+        Vector3 gradientColorB = default)
     {
         if (charBase == null) return;
 
@@ -143,12 +145,14 @@ public unsafe class EmissiveCBufferHook : IDisposable
                     var data = new TargetData
                     {
                         BaseColor = emissiveColor,
+                        GradientColorB = gradientColorB,
                         AnimMode = animMode,
                         AnimSpeed = animSpeed,
                         AnimAmplitude = animAmplitude,
                     };
                     if (targets.TryGetValue(key, out var existing)
                         && existing.BaseColor == data.BaseColor
+                        && existing.GradientColorB == data.GradientColorB
                         && existing.AnimMode == data.AnimMode
                         && existing.AnimSpeed == data.AnimSpeed
                         && existing.AnimAmplitude == data.AnimAmplitude)
@@ -437,16 +441,20 @@ public unsafe class EmissiveCBufferHook : IDisposable
 
     private Vector3 ComputeModulatedColor(TargetData data)
     {
-        if (data.AnimAmplitude <= 0f || data.AnimSpeed <= 0f)
+        if (data.AnimMode == EmissiveAnimMode.None
+            || data.AnimAmplitude <= 0f || data.AnimSpeed <= 0f)
             return data.BaseColor;
         double t = clock.Elapsed.TotalSeconds;
         float s = (float)Math.Sin(t * data.AnimSpeed * 2.0 * Math.PI);
-        float wave = data.AnimMode switch
+        if (data.AnimMode == EmissiveAnimMode.Gradient)
         {
-            EmissiveAnimMode.Pulse => s,
-            EmissiveAnimMode.Flicker => s >= 0f ? 1f : -1f,
-            _ => 0f,
-        };
+            // mix ∈ [0.5-0.5*amp, 0.5+0.5*amp] — amp controls how far we swing between colors
+            float mix = MathF.Max(0f, MathF.Min(1f, 0.5f + 0.5f * data.AnimAmplitude * s));
+            return Vector3.Lerp(data.BaseColor, data.GradientColorB, mix);
+        }
+        float wave = data.AnimMode == EmissiveAnimMode.Flicker
+            ? (s >= 0f ? 1f : -1f)
+            : s;
         float k = MathF.Max(0f, 1f + wave * data.AnimAmplitude);
         return data.BaseColor * k;
     }

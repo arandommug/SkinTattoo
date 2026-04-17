@@ -462,24 +462,33 @@ public static class SkinShpkPatcher
         0x00107E46, 0x0000000A,
         0x00106000, 0x00000005);
 
-    // Animation modulation payload: 12 instructions, 94 tokens, 376 bytes.
-    // Samples a SECOND ColorTable column (U=0.4375 = column 3 = halfs 12..15) to get
-    // per-layer speed / amplitude / mode; the first sample (U=0.3125) already gave us emissive.
-    // Inserted DIRECTLY AFTER the emissive sample. r9 and r2 are scratch (r2 is overwritten
-    // a few instructions later by the original shader so collision is safe).
+    // Animation modulation payload: 21 instructions, 171 tokens, 684 bytes.
+    // Pulse + Flicker + Gradient: samples col 3 (anim params) and col 4 (colorB RGB in halfs
+    // 17/18/19; half 16 = roughness, ignored). r7 holds backup of sin and colorA for the
+    // Gradient branch; r1 ends up holding the final emissive color routed by mode.
     //
-    //   mov    r9.x, l(0.4375)                      ; U for animation column
-    //   mad    r9.y, r0.z, l(0.9375), l(0.015625)   ; V from normal.alpha (same formula as emissive sample)
-    //   sample r2.xyzw, r9.xyxx, t10, s5            ; r2.x=speed, r2.y=amp, r2.z=mode
-    //   mul    r9.x, r2.x, cb2[0].x                 ; phase = speed * m_LoopTime
+    //   mov    r9.x, l(0.4375)                      ; col 3 U
+    //   mad    r9.y, r0.z, l(0.9375), l(0.015625)   ; V from normal.alpha
+    //   sample r2.xyzw, r9.xyxx, t10, s5            ; r2.x=speed, .y=amp, .z=mode
+    //   mul    r9.x, r2.x, cb2[0].x                 ; phase = speed * LoopTime
     //   mul    r9.x, r9.x, l(6.283185)              ; *2pi
-    //   sincos r9.x, null, r9.x                     ; r9.x = sin(phase)  (pulse wave)
-    //   ge     r9.z, r9.x, l(0)                     ; mask = (sin >= 0)
-    //   movc   r9.z, r9.z, l(1), l(-1)              ; sign = mask ? +1 : -1  (square wave)
-    //   ge     r9.w, r2.z, l(0.5)                   ; flicker_mask = (mode >= 0.5)
+    //   sincos r9.x, null, r9.x                     ; r9.x = sin(phase)
+    //   mov    r7.w, r9.x                           ; backup sin for Gradient
+    //   ge     r9.z, r9.x, l(0)                     ; sin>=0 mask
+    //   movc   r9.z, r9.z, l(1), l(-1)              ; sign (square wave)
+    //   ge     r9.w, r2.z, l(0.5)                   ; mode >= 0.5? (flicker/gradient)
     //   movc   r9.x, r9.w, r9.z, r9.x               ; wave = flicker_mask ? sign : sin
-    //   mad    r9.x, r2.y, r9.x, l(1.0)             ; k = amp*wave + 1
-    //   mul    r1.xyz, r1.xyzx, r9.xxxx             ; emissive *= k
+    //   mad    r9.x, r2.y, r9.x, l(1.0)             ; k_pf = amp*wave + 1
+    //   mov    r7.xyz, r1.xyzx                      ; backup colorA for Gradient
+    //   mul    r1.xyz, r1.xyzx, r9.xxxx             ; r1 = Pulse/Flicker result
+    //   mov    r9.z, l(0.5625)                      ; col 4 U
+    //   sample r3.xyzw, r9.zyzz, t10, s5            ; r3.y/z/w = colorB RGB (r3.x=rough)
+    //   mul    r4.x, r7.w, r2.y                     ; amp * sin (original, not square)
+    //   mad    r4.x, r4.x, l(0.5), l(0.5)           ; mix = 0.5 + 0.5*amp*sin ∈ [0..1]
+    //   add    r5.xyz, r3.yzwy, -r7.xyzx            ; colorB - colorA
+    //   mad    r5.xyz, r4.xxxx, r5.xyzx, r7.xyzx    ; lerp(colorA, colorB, mix)
+    //   ge     r4.y, r2.z, l(1.5)                   ; mode >= 1.5? (gradient)
+    //   movc   r1.xyz, r4.yyyy, r5.xyzx, r1.xyzx    ; final: gradient_mask ? lerp : k_pf
     private static readonly byte[] PulsePayload = ToLeBytes(
         0x05000036, 0x00100012, 0x00000009, 0x00004001, 0x3EE00000,
         0x09000032, 0x00100022, 0x00000009, 0x0010002A, 0x00000000, 0x00004001, 0x3F700000, 0x00004001, 0x3C800000,
@@ -487,12 +496,22 @@ public static class SkinShpkPatcher
         0x08000038, 0x00100012, 0x00000009, 0x0010000A, 0x00000002, 0x0020800A, 0x00000002, 0x00000000,
         0x07000038, 0x00100012, 0x00000009, 0x0010000A, 0x00000009, 0x00004001, 0x40C90FDA,
         0x0600004D, 0x00100012, 0x00000009, 0x0000D000, 0x0010000A, 0x00000009,
+        0x05000036, 0x00100082, 0x00000007, 0x0010000A, 0x00000009,
         0x0700001D, 0x00100042, 0x00000009, 0x0010000A, 0x00000009, 0x00004001, 0x00000000,
         0x09000037, 0x00100042, 0x00000009, 0x0010002A, 0x00000009, 0x00004001, 0x3F800000, 0x00004001, 0xBF800000,
         0x0700001D, 0x00100082, 0x00000009, 0x0010002A, 0x00000002, 0x00004001, 0x3F000000,
         0x09000037, 0x00100012, 0x00000009, 0x0010003A, 0x00000009, 0x0010002A, 0x00000009, 0x0010000A, 0x00000009,
         0x09000032, 0x00100012, 0x00000009, 0x0010001A, 0x00000002, 0x0010000A, 0x00000009, 0x00004001, 0x3F800000,
-        0x07000038, 0x00100072, 0x00000001, 0x00100246, 0x00000001, 0x00100006, 0x00000009);
+        0x05000036, 0x00100072, 0x00000007, 0x00100246, 0x00000001,
+        0x07000038, 0x00100072, 0x00000001, 0x00100246, 0x00000001, 0x00100006, 0x00000009,
+        0x05000036, 0x00100042, 0x00000009, 0x00004001, 0x3F100000,
+        0x8B000045, 0x800000C2, 0x00155543, 0x001000F2, 0x00000003, 0x00100A66, 0x00000009, 0x00107E46, 0x0000000A, 0x00106000, 0x00000005,
+        0x07000038, 0x00100012, 0x00000004, 0x0010003A, 0x00000007, 0x0010001A, 0x00000002,
+        0x09000032, 0x00100012, 0x00000004, 0x0010000A, 0x00000004, 0x00004001, 0x3F000000, 0x00004001, 0x3F000000,
+        0x08000000, 0x00100072, 0x00000005, 0x00100796, 0x00000003, 0x80100246, 0x00000041, 0x00000007,
+        0x09000032, 0x00100072, 0x00000005, 0x00100006, 0x00000004, 0x00100246, 0x00000005, 0x00100246, 0x00000007,
+        0x0700001D, 0x00100022, 0x00000004, 0x0010002A, 0x00000002, 0x00004001, 0x3FC00000,
+        0x09000037, 0x00100072, 0x00000001, 0x00100556, 0x00000004, 0x00100246, 0x00000005, 0x00100246, 0x00000001);
 
     /// <summary>Insert pulse modulation payload after the ColorTable sample instruction
     /// so only the emissive term (r1.xyz) gets modulated.</summary>

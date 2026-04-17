@@ -136,6 +136,7 @@
     "anim_mode": "动画",
     "speed": "速度",
     "amplitude": "幅度",
+    "color_b": "颜色 B",
     "mask_preview": "遮罩预览:",
     "mask_label": "遮罩",
     "effect_label": "效果",
@@ -183,7 +184,8 @@
   "anim": {
     "none": "无",
     "pulse": "脉冲",
-    "flicker": "闪烁"
+    "flicker": "闪烁",
+    "gradient": "双色渐变"
   },
   "enum": {
     "blendmode": {

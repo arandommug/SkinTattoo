@@ -243,14 +243,14 @@ public partial class MainWindow
                 ImGui.AlignTextToFramePadding(); ImGui.TextDisabled(Strings.T("label.anim_mode")); ImGui.SameLine();
                 ImGui.SetNextItemWidth(80f);
                 var animIdx = (int)layer.AnimMode;
-                var animNames = new[] { Strings.T("anim.none"), Strings.T("anim.pulse"), Strings.T("anim.flicker") };
+                var animNames = new[] { Strings.T("anim.none"), Strings.T("anim.pulse"), Strings.T("anim.flicker"), Strings.T("anim.gradient") };
                 if (ImGui.Combo("##animMode", ref animIdx, animNames, animNames.Length))
                 {
                     layer.AnimMode = (EmissiveAnimMode)animIdx;
                     MarkPreviewDirty();
                     TryDirectEmissiveUpdate(group);
                 }
-                if (layer.AnimMode == EmissiveAnimMode.Pulse || layer.AnimMode == EmissiveAnimMode.Flicker)
+                if (layer.AnimMode != EmissiveAnimMode.None)
                 {
                     ImGui.SameLine();
                     ImGui.TextDisabled(Strings.T("label.speed")); ImGui.SameLine();
@@ -264,6 +264,15 @@ public partial class MainWindow
                     var am = layer.AnimAmplitude;
                     if (ImGui.SliderFloat("##animAmp", ref am, 0f, 1f, "%.2f"))
                     { layer.AnimAmplitude = am; MarkPreviewDirty(); TryDirectEmissiveUpdate(group); }
+
+                    if (layer.AnimMode == EmissiveAnimMode.Gradient)
+                    {
+                        ImGui.AlignTextToFramePadding(); ImGui.TextDisabled(Strings.T("label.color_b")); ImGui.SameLine();
+                        var emB = layer.EmissiveColorB;
+                        if (ImGui.ColorEdit3("##emColorB", ref emB,
+                            ImGuiColorEditFlags.NoLabel | ImGuiColorEditFlags.NoInputs))
+                        { layer.EmissiveColorB = emB; MarkPreviewDirty(); TryDirectEmissiveUpdate(group); }
+                    }
                 }
             }
         }
