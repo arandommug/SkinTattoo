@@ -550,8 +550,14 @@ public class PreviewService : IDisposable
         foreach (var entry in batch.Textures)
         {
             var slot = textureSwap!.FindTextureSlot(charBase, entry.GamePath, entry.DiskPath);
-            if (slot != null)
-                textureSwap.SwapTexture(slot, entry.BgraData, entry.Width, entry.Height);
+            if (slot == null)
+            {
+                DebugServer.AppendLog($"[Swap] slot not found: {entry.GamePath} (disk={entry.DiskPath ?? "null"})");
+                continue;
+            }
+            var ok = textureSwap.SwapTexture(slot, entry.BgraData, entry.Width, entry.Height);
+            if (!ok)
+                DebugServer.AppendLog($"[Swap] SwapTexture failed: {entry.GamePath}");
         }
 
         foreach (var ct in batch.ColorTables)
