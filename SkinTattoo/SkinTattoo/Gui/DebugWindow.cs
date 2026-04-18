@@ -39,10 +39,9 @@ public class DebugWindow : Window
         ImGui.SameLine();
         if (multiSelectMode)
         {
-            var label = $"{Strings.T("button.copy_selected")} ({selectedLines.Count})";
             using (ImRaii.Disabled(selectedLines.Count == 0))
             {
-                if (ImGui.Button(label))
+                if (ImGui.Button(Strings.T("button.copy_selected")))
                 {
                     var sb = new StringBuilder();
                     foreach (var line in DebugServer.LogBuffer)
