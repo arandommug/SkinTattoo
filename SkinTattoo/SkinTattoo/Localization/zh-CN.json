@@ -194,6 +194,8 @@
     "http_enable": "启用 HTTP 服务器##httpEn"
   },
   "menu": {
+    "copy_decal_group": "复制贴花组",
+    "paste_decal_group": "粘贴贴花组",
     "copy_diffuse_path": "复制贴图路径",
     "copy_normal_path": "复制法线路径",
     "copy_material_path": "复制材质路径",

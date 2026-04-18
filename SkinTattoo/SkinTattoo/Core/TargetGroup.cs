@@ -110,4 +110,15 @@ public class TargetGroup
                 return true;
         return false;
     }
+
+    public void ReplaceLayersFrom(TargetGroup source)
+    {
+        Layers.Clear();
+        foreach (var layer in source.Layers)
+            Layers.Add(layer.Clone());
+
+        SelectedLayerIndex = source.SelectedLayerIndex >= 0 && source.SelectedLayerIndex < Layers.Count
+            ? source.SelectedLayerIndex
+            : (Layers.Count > 0 ? 0 : -1);
+    }
 }

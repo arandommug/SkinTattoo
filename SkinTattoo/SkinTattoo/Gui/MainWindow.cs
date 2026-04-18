@@ -74,6 +74,9 @@ public partial class MainWindow : Window, IDisposable
     private int highlightFrameCounter;
     private const int HighlightCycleSteps = 400;
 
+    private List<DecalLayer>? copiedGroupLayers;
+    private int copiedGroupSelectedLayerIndex = -1;
+
     // Init phase
     private enum InitPhase { Pending, Loading, Done }
     private InitPhase initPhase = InitPhase.Pending;

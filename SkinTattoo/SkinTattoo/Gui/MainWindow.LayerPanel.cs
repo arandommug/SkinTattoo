@@ -143,6 +143,15 @@ public partial class MainWindow
             using (ImRaii.Disabled(!hasMtrl))
                 if (ImGui.MenuItem(Strings.T("menu.copy_material_path")))
                     ImGui.SetClipboardText(group.MtrlGamePath ?? "");
+
+            ImGui.Separator();
+
+            if (ImGui.MenuItem(Strings.T("menu.copy_decal_group")))
+                CopyDecalGroup(group);
+
+            using (ImRaii.Disabled(copiedGroupLayers == null))
+                if (ImGui.MenuItem(Strings.T("menu.paste_decal_group")))
+                    PasteDecalGroup(gi);
             ImGui.EndPopup();
         }
 
@@ -325,5 +334,45 @@ public partial class MainWindow
             new Vector2(headerStart.X + availWidth, bodyEnd.Y),
             ImGui.GetColorU32(new Vector4(0.28f, 0.28f, 0.32f, 1f)), 4f);
         drawList.ChannelsMerge();
+    }
+
+    private void CopyDecalGroup(TargetGroup group)
+    {
+        copiedGroupLayers = [];
+        foreach (var layer in group.Layers)
+            copiedGroupLayers.Add(layer.Clone());
+
+        copiedGroupSelectedLayerIndex = group.SelectedLayerIndex;
+    }
+
+    private void PasteDecalGroup(int targetGroupIndex)
+    {
+        if (copiedGroupLayers == null || targetGroupIndex < 0 || targetGroupIndex >= project.Groups.Count)
+            return;
+
+        var targetGroup = project.Groups[targetGroupIndex];
+
+        if (highlightActive && highlightGroupIndex == targetGroupIndex)
+        {
+            RestoreEmissiveAfterHighlight(targetGroup);
+            highlightActive = false;
+            highlightGroupIndex = -1;
+            highlightLayerIndex = -1;
+            highlightFrameCounter = 0;
+        }
+
+        previewService.InvalidateEmissiveForGroup(targetGroup);
+        foreach (var layer in targetGroup.Layers)
+            previewService.ForceReleaseRowPair(targetGroup, layer);
+
+        var clipboardGroup = new TargetGroup { SelectedLayerIndex = copiedGroupSelectedLayerIndex };
+        foreach (var layer in copiedGroupLayers)
+            clipboardGroup.Layers.Add(layer.Clone());
+        targetGroup.ReplaceLayersFrom(clipboardGroup);
+
+        project.SelectedGroupIndex = targetGroupIndex;
+        SyncImagePathBuf();
+        previewService.ForceFullRedrawNextCycle();
+        MarkPreviewDirty(immediate: true);
     }
 }

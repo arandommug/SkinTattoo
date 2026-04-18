@@ -197,6 +197,8 @@
     "copy_diffuse_path": "Copy Diffuse Path",
     "copy_normal_path": "Copy Normal Path",
     "copy_material_path": "Copy Material Path",
+    "copy_decal_group": "Copy Decal Group",
+    "paste_decal_group": "Paste Decal Group",
     "copy_game_path": "Copy Game Path",
     "copy_actual_path": "Copy Actual Path"
   },
