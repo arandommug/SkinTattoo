@@ -64,17 +64,20 @@ public class DebugWindow : Window
         }
 
         ImGui.SameLine();
-        var multiLabel = multiSelectMode
+        // Snapshot the mode BEFORE the Button so the Push/Pop pair stays balanced
+        // even when the click flips multiSelectMode inside the if-block.
+        var wasMultiSelect = multiSelectMode;
+        var multiLabel = wasMultiSelect
             ? Strings.T("button.exit_multi_select")
             : Strings.T("button.multi_select");
-        if (multiSelectMode)
+        if (wasMultiSelect)
             ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.3f, 0.5f, 0.8f, 1f));
         if (ImGui.Button(multiLabel))
         {
             multiSelectMode = !multiSelectMode;
             if (!multiSelectMode) selectedLines.Clear();
         }
-        if (multiSelectMode)
+        if (wasMultiSelect)
             ImGui.PopStyleColor();
 
         ImGui.SameLine();
