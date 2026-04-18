@@ -1,85 +1,99 @@
 {
   "versions": [
     {
+      "version": "0.2.2",
+      "date": "2026-04-19",
+      "en": [
+        { "text": "Copy / paste decal group actions (thanks @endfish, #1)", "links": [{ "label": "@endfish", "url": "https://github.com/endfish" }, { "label": "#1", "url": "https://github.com/TheDeathDragon/SkinTattoo/pull/1" }] },
+        { "text": "Decal rotate (CCW/CW 90°) and mirror (X/Y) tools (thanks @endfish, #2)", "links": [{ "label": "@endfish", "url": "https://github.com/endfish" }, { "label": "#2", "url": "https://github.com/TheDeathDragon/SkinTattoo/pull/2" }] },
+        { "text": "Pasting decal groups across materials with different texture aspect ratios no longer stretches decals" }
+      ],
+      "zh": [
+        { "text": "新增贴花组复制 / 粘贴 (感谢 @endfish, #1)", "links": [{ "label": "@endfish", "url": "https://github.com/endfish" }, { "label": "#1", "url": "https://github.com/TheDeathDragon/SkinTattoo/pull/1" }] },
+        { "text": "新增贴花旋转 (逆/顺 90°) 与镜像 (水平/垂直) 工具 (感谢 @endfish, #2)", "links": [{ "label": "@endfish", "url": "https://github.com/endfish" }, { "label": "#2", "url": "https://github.com/TheDeathDragon/SkinTattoo/pull/2" }] },
+        { "text": "跨不同宽高比材质粘贴贴花组时不再拉伸" }
+      ]
+    },
+    {
       "version": "0.2.1",
       "date": "2026-04-18",
       "en": [
-        "Normal target decals no longer leave trails when dragged",
-        "UV wireframe shows the full mesh right after plugin reload — no need to reopen the 3D editor",
-        "Path diagnostics opens in a resizable standalone window",
-        "Added Full Redraw toolbar button to recover when previews get stuck",
-        "Support for body mods with non-standard texture names (Bibo+ etc.)",
-        "Skin body materials no longer show the Mask option since it has no effect there",
-        "Changelog tab and multi-select copy in the debug log"
+        { "text": "Normal target decals no longer leave trails when dragged" },
+        { "text": "UV wireframe shows the full mesh right after plugin reload — no need to reopen the 3D editor" },
+        { "text": "Path diagnostics opens in a resizable standalone window" },
+        { "text": "Added Full Redraw toolbar button to recover when previews get stuck" },
+        { "text": "Support for body mods with non-standard texture names (Bibo+ etc.)" },
+        { "text": "Skin body materials no longer show the Mask option since it has no effect there" },
+        { "text": "Changelog tab and multi-select copy in the debug log" }
       ],
       "zh": [
-        "Normal 目标贴花拖动时不再有残影",
-        "插件重载后 UV 网格立即完整显示，无需重新打开 3D 编辑器",
-        "路径诊断改为独立可调整大小的窗口",
-        "工具栏新增完全重绘按钮，预览卡住时一键恢复",
-        "支持非标命名的身体 mod (Bibo+ 等)",
-        "skin 身体材质不再显示 Mask 选项 (该材质上没效果)",
-        "新增更新日志 Tab 和调试日志多选复制"
+        { "text": "Normal 目标贴花拖动时不再有残影" },
+        { "text": "插件重载后 UV 网格立即完整显示，无需重新打开 3D 编辑器" },
+        { "text": "路径诊断改为独立可调整大小的窗口" },
+        { "text": "工具栏新增完全重绘按钮，预览卡住时一键恢复" },
+        { "text": "支持非标命名的身体 mod (Bibo+ 等)" },
+        { "text": "skin 身体材质不再显示 Mask 选项 (该材质上没效果)" },
+        { "text": "新增更新日志 Tab 和调试日志多选复制" }
       ]
     },
     {
       "version": "0.2.0",
       "date": "2026-04-18",
       "en": [
-        "Per-layer target map: decals can independently paint Diffuse, Mask, or Normal textures",
-        "Normal / Mask layers preserve normal.alpha so the emissive and ColorTable row-index systems still work",
-        "Auto-detect normal maps on image load: filename hint (_n / _norm / normal) or blue-dominant RGB",
-        "Non-Diffuse target layers hide the Show Decal / Emissive / PBR controls for a cleaner parameter panel"
+        { "text": "Per-layer target map: decals can independently paint Diffuse, Mask, or Normal textures" },
+        { "text": "Normal / Mask layers preserve normal.alpha so the emissive and ColorTable row-index systems still work" },
+        { "text": "Auto-detect normal maps on image load: filename hint (_n / _norm / normal) or blue-dominant RGB" },
+        { "text": "Non-Diffuse target layers hide the Show Decal / Emissive / PBR controls for a cleaner parameter panel" }
       ],
       "zh": [
-        "按图层选择目标贴图：贴花可独立画到 Diffuse / Mask / Normal 三张贴图",
-        "Normal / Mask 图层不写 normal.alpha，保留给发光与 ColorTable 行号系统",
-        "加载图片时自动识别法线贴图：文件名含 _n / _norm / normal，或 RGB 蓝色主导即命中",
-        "非 Diffuse 目标下自动隐藏显示贴花/发光/PBR 选项，参数面板更简洁"
+        { "text": "按图层选择目标贴图：贴花可独立画到 Diffuse / Mask / Normal 三张贴图" },
+        { "text": "Normal / Mask 图层不写 normal.alpha，保留给发光与 ColorTable 行号系统" },
+        { "text": "加载图片时自动识别法线贴图：文件名含 _n / _norm / normal，或 RGB 蓝色主导即命中" },
+        { "text": "非 Diffuse 目标下自动隐藏显示贴花/发光/PBR 选项，参数面板更简洁" }
       ]
     },
     {
       "version": "0.1.2",
       "date": "2026-04-10",
       "en": [
-        "Emissive ripple animation with directional modes and dual-color support",
-        "Emissive gradient animation: smooth transition between two colors",
-        "Iris pulse animation with per-frame CBuffer modulation, flicker animation, fix for hidden layers breaking in-place swap"
+        { "text": "Emissive ripple animation with directional modes and dual-color support" },
+        { "text": "Emissive gradient animation: smooth transition between two colors" },
+        { "text": "Iris pulse animation with per-frame CBuffer modulation, flicker animation, fix for hidden layers breaking in-place swap" }
       ],
       "zh": [
-        "发光水波纹动画，支持方向模式与双色",
-        "发光双色渐变动画：在两种颜色之间平滑过渡",
-        "虹膜脉冲实时调制、闪烁动画，修复隐藏图层导致 in-place 失效"
+        { "text": "发光水波纹动画，支持方向模式与双色" },
+        { "text": "发光双色渐变动画：在两种颜色之间平滑过渡" },
+        { "text": "虹膜脉冲实时调制、闪烁动画，修复隐藏图层导致 in-place 失效" }
       ]
     },
     {
       "version": "0.1.1",
       "date": "2026-04-05",
       "en": [
-        "Per-layer emissive pulse animation with independent parameters",
-        "Cross-group visibility toggle + emissive layer feathering preserved across redraws",
-        "Iris mask compositing: patched emissive mask for vanilla eyes missing red-channel glow source"
+        { "text": "Per-layer emissive pulse animation with independent parameters" },
+        { "text": "Cross-group visibility toggle + emissive layer feathering preserved across redraws" },
+        { "text": "Iris mask compositing: patched emissive mask for vanilla eyes missing red-channel glow source" }
       ],
       "zh": [
-        "贴花发光脉冲动画，每层参数独立",
-        "跨组可见性切换，羽化+发光贴花状态在重绘间保留",
-        "虹膜 mask 合成：为红通道为空的原版眼睛自动生成发光遮罩"
+        { "text": "贴花发光脉冲动画，每层参数独立" },
+        { "text": "跨组可见性切换，羽化+发光贴花状态在重绘间保留" },
+        { "text": "虹膜 mask 合成：为红通道为空的原版眼睛自动生成发光遮罩" }
       ]
     },
     {
       "version": "0.1.0",
       "date": "2026-03-20",
       "en": [
-        "Initial release: real-time decal compositing on FFXIV skin textures via Penumbra temporary mods",
-        "UV canvas editor + 3D model preview with ray-picking decal placement",
-        "Per-layer blend modes, clip modes, UV transform, falloff masks",
-        ".pmp mod export for sharing with other users"
+        { "text": "Initial release: real-time decal compositing on FFXIV skin textures via Penumbra temporary mods" },
+        { "text": "UV canvas editor + 3D model preview with ray-picking decal placement" },
+        { "text": "Per-layer blend modes, clip modes, UV transform, falloff masks" },
+        { "text": ".pmp mod export for sharing with other users" }
       ],
       "zh": [
-        "首个版本：通过 Penumbra 临时 mod 在 FFXIV 皮肤贴图上实时合成贴花",
-        "UV 画布编辑器 + 3D 模型预览，支持射线点击放置贴花",
-        "按图层设置混合模式、裁剪、UV 变换、羽化遮罩",
-        ".pmp mod 导出，可分享给其他玩家"
+        { "text": "首个版本：通过 Penumbra 临时 mod 在 FFXIV 皮肤贴图上实时合成贴花" },
+        { "text": "UV 画布编辑器 + 3D 模型预览，支持射线点击放置贴花" },
+        { "text": "按图层设置混合模式、裁剪、UV 变换、羽化遮罩" },
+        { "text": ".pmp mod 导出，可分享给其他玩家" }
       ]
     }
   ]

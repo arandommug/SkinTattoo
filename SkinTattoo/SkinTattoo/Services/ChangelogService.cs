@@ -7,14 +7,26 @@ using Newtonsoft.Json.Linq;
 
 namespace SkinTattoo.Services;
 
+public sealed class ChangelogLink
+{
+    public string Label { get; init; } = "";
+    public string Url { get; init; } = "";
+}
+
+public sealed class ChangelogBullet
+{
+    public string Text { get; init; } = "";
+    public IReadOnlyList<ChangelogLink> Links { get; init; } = Array.Empty<ChangelogLink>();
+}
+
 public sealed class ChangelogEntry
 {
     public string Version { get; init; } = "";
     public string Date { get; init; } = "";
-    public IReadOnlyList<string> En { get; init; } = Array.Empty<string>();
-    public IReadOnlyList<string> Zh { get; init; } = Array.Empty<string>();
+    public IReadOnlyList<ChangelogBullet> En { get; init; } = Array.Empty<ChangelogBullet>();
+    public IReadOnlyList<ChangelogBullet> Zh { get; init; } = Array.Empty<ChangelogBullet>();
 
-    public IReadOnlyList<string> BulletsFor(string languageCode)
+    public IReadOnlyList<ChangelogBullet> BulletsFor(string languageCode)
         => languageCode.StartsWith("zh", StringComparison.OrdinalIgnoreCase) ? Zh : En;
 }
 
@@ -48,8 +60,8 @@ public sealed class ChangelogService
                 {
                     Version = v.Value<string>("version") ?? "",
                     Date = v.Value<string>("date") ?? "",
-                    En = ToStringArray(v["en"]),
-                    Zh = ToStringArray(v["zh"]),
+                    En = ToBulletArray(v["en"]),
+                    Zh = ToBulletArray(v["zh"]),
                 });
             return list;
         }
@@ -68,12 +80,39 @@ public sealed class ChangelogService
         return null;
     }
 
-    private static string[] ToStringArray(JToken? tok)
+    private static ChangelogBullet[] ToBulletArray(JToken? tok)
     {
-        if (tok is not JArray arr) return Array.Empty<string>();
-        var result = new string[arr.Count];
+        if (tok is not JArray arr) return Array.Empty<ChangelogBullet>();
+        var result = new ChangelogBullet[arr.Count];
         for (int i = 0; i < arr.Count; i++)
-            result[i] = arr[i].Value<string>() ?? "";
+            result[i] = ParseBullet(arr[i]);
+        return result;
+    }
+
+    private static ChangelogBullet ParseBullet(JToken tok)
+    {
+        if (tok is JObject obj)
+            return new ChangelogBullet
+            {
+                Text = obj.Value<string>("text") ?? "",
+                Links = ParseLinks(obj["links"]),
+            };
+        return new ChangelogBullet { Text = tok.Value<string>() ?? "" };
+    }
+
+    private static ChangelogLink[] ParseLinks(JToken? tok)
+    {
+        if (tok is not JArray arr) return Array.Empty<ChangelogLink>();
+        var result = new ChangelogLink[arr.Count];
+        for (int i = 0; i < arr.Count; i++)
+        {
+            var o = arr[i] as JObject;
+            result[i] = new ChangelogLink
+            {
+                Label = o?.Value<string>("label") ?? "",
+                Url = o?.Value<string>("url") ?? "",
+            };
+        }
         return result;
     }
 }

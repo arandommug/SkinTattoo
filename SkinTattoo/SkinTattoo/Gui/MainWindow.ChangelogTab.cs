@@ -1,12 +1,16 @@
+using System;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Utility.Raii;
+using SkinTattoo.Services;
 using SkinTattoo.Services.Localization;
 
 namespace SkinTattoo.Gui;
 
 public partial class MainWindow
 {
+    private static readonly Vector4 ChangelogLinkColor = new(0.45f, 0.75f, 1f, 1f);
+
     private void DrawChangelogTab()
     {
         using var scroll = ImRaii.Child("##ChangelogScroll", new Vector2(-1, -1), false);
@@ -41,10 +45,69 @@ public partial class MainWindow
                 ImGui.Spacing();
 
                 foreach (var bullet in entry.BulletsFor(lang))
-                    ImGui.BulletText(bullet);
+                    DrawBullet(bullet);
 
                 ImGui.Spacing();
             }
         }
+    }
+
+    private static void DrawBullet(ChangelogBullet bullet)
+    {
+        if (bullet.Links.Count == 0)
+        {
+            ImGui.BulletText(bullet.Text);
+            return;
+        }
+
+        ImGui.Bullet();
+        ImGui.SameLine(0, 0);
+
+        var text = bullet.Text;
+        int cursor = 0;
+        bool needSameLine = false;
+        foreach (var link in bullet.Links)
+        {
+            if (string.IsNullOrEmpty(link.Label)) continue;
+            int idx = text.IndexOf(link.Label, cursor, StringComparison.Ordinal);
+            if (idx < 0) continue;
+            if (idx > cursor)
+            {
+                if (needSameLine) ImGui.SameLine(0, 0);
+                ImGui.TextUnformatted(text.Substring(cursor, idx - cursor));
+                needSameLine = true;
+            }
+            if (needSameLine) ImGui.SameLine(0, 0);
+            DrawLink(link.Label, link.Url);
+            needSameLine = true;
+            cursor = idx + link.Label.Length;
+        }
+        if (cursor < text.Length)
+        {
+            if (needSameLine) ImGui.SameLine(0, 0);
+            ImGui.TextUnformatted(text.Substring(cursor));
+        }
+    }
+
+    private static void DrawLink(string label, string url)
+    {
+        ImGui.PushStyleColor(ImGuiCol.Text, ChangelogLinkColor);
+        ImGui.TextUnformatted(label);
+        ImGui.PopStyleColor();
+
+        var min = ImGui.GetItemRectMin();
+        var max = ImGui.GetItemRectMax();
+        ImGui.GetWindowDrawList().AddLine(
+            new Vector2(min.X, max.Y - 1),
+            new Vector2(max.X, max.Y - 1),
+            ImGui.ColorConvertFloat4ToU32(ChangelogLinkColor));
+
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+            ImGui.SetTooltip(url);
+        }
+        if (ImGui.IsItemClicked())
+            OpenUrl(url);
     }
 }
