@@ -19,6 +19,9 @@
     "resource": {
       "title": "添加目标材质"
     },
+    "path_diag": {
+      "title": "路径诊断"
+    },
     "editor3d": {
       "title": "3D 编辑器"
     }

@@ -19,6 +19,9 @@
     "resource": {
       "title": "Add Target Material"
     },
+    "path_diag": {
+      "title": "Path Diagnostics"
+    },
     "editor3d": {
       "title": "3D Editor"
     }

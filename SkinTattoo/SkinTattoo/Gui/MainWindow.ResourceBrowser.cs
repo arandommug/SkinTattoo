@@ -108,6 +108,10 @@ public partial class MainWindow
         DrawResourceLoadingOverlay();
 
         ImGui.End();
+
+        // Independent diagnostics window — drawn outside the resource browser's
+        // Begin/End so it's a separate OS-level window the user can drag/resize.
+        DrawPathDiagWindow(cards);
     }
 
     private void DrawResourceLoadingOverlay()
@@ -285,11 +289,13 @@ public partial class MainWindow
                 ImGui.SetTooltip(string.Join("\n", card.MtrlPaths.Select(p => "• " + Path.GetFileName(p))));
         }
 
-        // Diagnostics popup: copy tex / mtrl / live mdl / derived candidate mdl
+        // Diagnostics window: copy tex / mtrl / live mdl / derived candidate mdl
         ImGui.SameLine();
         if (ImGui.SmallButton(Strings.T("button.path")))
-            ImGui.OpenPopup("##PathDiag");
-        DrawPathDiagPopup(card);
+        {
+            openDiagCardMtrl = card.MtrlPaths.Count > 0 ? card.MtrlPaths[0] : null;
+            diagWindowOpen = openDiagCardMtrl != null;
+        }
 
         // Texture previews: Diffuse | Normal | Mask
         var texSize = new Vector2(160, 160);
@@ -299,6 +305,12 @@ public partial class MainWindow
         ImGui.SameLine();
         DrawTexPreview("Mask", card.MaskGamePath, card.MaskActualPath, texSize);
     }
+
+    // Diagnostics window state. One window shared by all cards, identified by
+    // the card's first mtrl game path so each frame's rebuilt card list can
+    // resolve back to the original row the user clicked on.
+    private string? openDiagCardMtrl;
+    private bool diagWindowOpen;
 
     // Cache the resolver result per-card so the popup doesn't re-run the
     // resolver (which reads .mdl files from disk) every frame.
@@ -315,10 +327,32 @@ public partial class MainWindow
         return cached;
     }
 
-    private void DrawPathDiagPopup(MtrlCardInfo card)
+    private void DrawPathDiagWindow(List<MtrlCardInfo> cards)
     {
-        if (!ImGui.BeginPopup("##PathDiag")) return;
+        if (!diagWindowOpen || string.IsNullOrEmpty(openDiagCardMtrl)) return;
 
+        MtrlCardInfo? card = null;
+        foreach (var c in cards)
+        {
+            if (c.MtrlPaths.Count > 0 && c.MtrlPaths[0] == openDiagCardMtrl)
+            { card = c; break; }
+        }
+        if (card == null) { diagWindowOpen = false; return; }
+
+        ImGui.SetNextWindowSize(new Vector2(720, 540), ImGuiCond.FirstUseEver);
+        if (!ImGui.Begin(Strings.T("window.path_diag.title") + "###PathDiagWindow",
+                ref diagWindowOpen))
+        {
+            ImGui.End();
+            return;
+        }
+
+        DrawPathDiagContent(card);
+        ImGui.End();
+    }
+
+    private void DrawPathDiagContent(MtrlCardInfo card)
+    {
         var firstMtrl = card.MtrlPaths.Count > 0 ? card.MtrlPaths[0] : null;
         var derived = Core.TexPathParser.ParseBest(card.DiffuseGamePath, firstMtrl);
 
@@ -401,10 +435,8 @@ public partial class MainWindow
         }
 
         ImGui.Separator();
-        if (ImGui.MenuItem(Strings.T("label.copy_clipboard")))
+        if (ImGui.Button(Strings.T("label.copy_clipboard")))
             ImGui.SetClipboardText(BuildCardMarkdown(card));
-
-        ImGui.EndPopup();
     }
 
     private string BuildCardMarkdown(MtrlCardInfo card)
