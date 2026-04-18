@@ -85,10 +85,8 @@ public class DebugWindow : Window
 
         ImGui.SameLine();
         ImGui.SetNextItemWidth(200);
-        ImGui.InputTextWithHint("##LogFilter", Strings.T("label.filter_hint"), ref logFilter, 256);
-
-        ImGui.SameLine();
-        ImGui.TextDisabled($"({DebugServer.LogBuffer.Count})");
+        var filterHint = $"{Strings.T("label.filter_hint")} ({DebugServer.LogBuffer.Count})";
+        ImGui.InputTextWithHint("##LogFilter", filterHint, ref logFilter, 256);
 
         ImGui.Separator();
 
