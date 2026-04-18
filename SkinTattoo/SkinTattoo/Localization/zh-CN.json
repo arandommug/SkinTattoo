@@ -75,6 +75,7 @@
     "penumbra_not_running": "Penumbra 未运行",
     "load_mesh": "加载模型",
     "reload_mesh": "重新加载模型",
+    "full_redraw": "完全重绘 - 清缓存并通过 Penumbra 重建角色",
     "auto_preview": "参数变化时自动更新游戏内预览",
     "update_preview": "更新预览",
     "add_group": "添加目标材质",

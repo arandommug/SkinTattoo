@@ -75,6 +75,7 @@
     "penumbra_not_running": "Penumbra is not running",
     "load_mesh": "Load mesh",
     "reload_mesh": "Reload mesh",
+    "full_redraw": "Full redraw - clear cache and rebuild via Penumbra",
     "auto_preview": "Auto-update in-game preview on parameter change",
     "update_preview": "Update preview",
     "add_group": "Add target material",

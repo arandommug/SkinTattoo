@@ -463,6 +463,21 @@ public partial class MainWindow : Window, IDisposable
             ImGui.SameLine();
         }
 
+        using (ImRaii.Disabled(!penumbra.IsAvailable))
+        {
+            if (ImGuiComponents.IconButton(7, FontAwesomeIcon.Redo))
+            {
+                previewService.ClearTextureCache();
+                previewService.ResetSwapState();
+                penumbra.ClearRedirect();
+                penumbra.RedrawPlayer();
+                MarkPreviewDirty(immediate: true);
+            }
+        }
+        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+            ImGui.SetTooltip(Strings.T("tooltip.full_redraw"));
+        ImGui.SameLine();
+
         var autoPreview = config.AutoPreview;
         if (ImGui.Checkbox(Strings.T("checkbox.auto_preview"), ref autoPreview))
         {

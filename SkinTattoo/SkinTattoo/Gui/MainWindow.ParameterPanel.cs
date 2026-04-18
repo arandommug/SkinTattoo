@@ -116,6 +116,10 @@ public partial class MainWindow
         {
             layer.TargetMap = (TargetMap)tmIdx;
             autoNormalNoticeForIndex = -1;
+            // Force next cycle through Penumbra so redirects for the new
+            // target texture get mounted (inplace swap can't introduce a new
+            // redirect key, only update existing ones).
+            previewService.ForceFullRedrawNextCycle();
             MarkPreviewDirty(immediate: true);
         }
         if (ImGui.IsItemHovered()) ImGui.SetTooltip(Strings.T("target_map.tooltip"));
