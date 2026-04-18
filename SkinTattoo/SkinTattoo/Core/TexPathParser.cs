@@ -26,8 +26,13 @@ public static class TexPathParser
     // chara/human/c1401/obj/body/b0001/material/v0001/mt_c1401b0001_a.mtrl
     // chara/human/c1401/obj/face/f0001/material/mt_c1401f0001_fac_a.mtrl
     // chara/human/c1401/obj/tail/t0004/material/v0001/mt_c1401t0004_a.mtrl
+    // chara/human/c1401/obj/body/b0001/material/v0001/mt_c1401b0001_bibo.mtrl  (body mod)
+    //
+    // Role is whitelisted (fac/iri/etc/hir) to avoid misclassifying custom body
+    // mod suffixes like _bibo as roles. The trailing suffix is a free-form token
+    // list so the engine and community suffixes (_a, _bibo, _gen3, ...) both parse.
     private static readonly Regex MtrlRegex = new(
-        @"^chara/human/c(?<race>\d{4})/obj/(?<slot>body|face|tail|hair|zear)/(?<abbr>[bfthz])(?<id>\d{4})/material(?:/v\d{4})?/mt_c\d{4}[bfthz]\d{4}(?:_(?<role>[a-z]+))?_[a-z]\.mtrl$",
+        @"^chara/human/c(?<race>\d{4})/obj/(?<slot>body|face|tail|hair|zear)/(?<abbr>[bfthz])(?<id>\d{4})/material(?:/v\d{4})?/mt_c\d{4}[bfthz]\d{4}(?:_(?<role>fac|iri|etc|hir))?(?:_[a-z0-9]+)*\.mtrl$",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     // chara/human/c1401/obj/body/b0001/texture/c1401b0001_base.tex
