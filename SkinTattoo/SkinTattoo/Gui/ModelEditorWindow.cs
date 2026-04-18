@@ -356,7 +356,15 @@ public class ModelEditorWindow : Window, IDisposable
 
     private void RenderScene()
     {
-        if (!meshBuffer.IsLoaded) return;
+        if (!meshBuffer.IsLoaded)
+        {
+            // Empty BeginFrame/EndFrame clears the render target to the background
+            // color so the viewport doesn't keep showing a stale last-rendered mesh
+            // after the group/layer that owned it is deleted.
+            renderer.BeginFrame(out var rR, out var rRtv, out var rDsv, out var rDss);
+            renderer.EndFrame(rR, rRtv, rDsv, rDss);
+            return;
+        }
 
         renderer.BeginFrame(out var oldR, out var oldRtv, out var oldDsv, out var oldDss);
 

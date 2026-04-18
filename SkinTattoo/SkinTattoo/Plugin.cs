@@ -170,14 +170,24 @@ public sealed class Plugin : IDalamudPlugin
                     }
                 }
 
+                // Prefer the selected group so the canvas wireframe + 3D editor
+                // match without the user having to click "reload model" manually.
                 TargetGroup? meshGroup = null;
-                foreach (var group in project.Groups)
+                var selected = project.SelectedGroup;
+                if (selected != null
+                    && (selected.MeshSlots.Count > 0 || selected.AllMeshPaths.Count > 0))
                 {
-                    if ((group.MeshSlots.Count > 0 || group.AllMeshPaths.Count > 0)
-                        && previewService.CurrentMesh == null)
+                    meshGroup = selected;
+                }
+                else
+                {
+                    foreach (var group in project.Groups)
                     {
-                        meshGroup = group;
-                        break;
+                        if (group.MeshSlots.Count > 0 || group.AllMeshPaths.Count > 0)
+                        {
+                            meshGroup = group;
+                            break;
+                        }
                     }
                 }
                 if (meshGroup != null)

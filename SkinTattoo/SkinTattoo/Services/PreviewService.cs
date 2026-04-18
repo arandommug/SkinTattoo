@@ -60,6 +60,22 @@ public class PreviewService : IDisposable
     private readonly MeshExtractor meshExtractor;
     private readonly DecalImageLoader imageLoader;
 
+    // Cached "does the group's mtrl expose g_SamplerMask?" answers. Keyed by
+    // mtrl game path. Populated on first lookup so the UI combo stays fast.
+    private readonly ConcurrentDictionary<string, bool> maskSupportCache = new();
+
+    /// <summary>Does the group's material declare a g_SamplerMask sampler?</summary>
+    public bool MaterialSupportsMask(TargetGroup group)
+    {
+        if (string.IsNullOrEmpty(group.MtrlGamePath)) return false;
+        return maskSupportCache.GetOrAdd(group.MtrlGamePath!, key =>
+        {
+            var mtrlDisk = group.OrigMtrlDiskPath ?? group.MtrlDiskPath;
+            var maskGamePath = GetMaskGamePathFromMtrl(key, mtrlDisk);
+            return !string.IsNullOrEmpty(maskGamePath);
+        });
+    }
+
     /// <summary>Heuristic: filename hint (_n / _norm / "normal") plus RGB-clustering fallback.</summary>
     public bool IsLikelyNormalMap(string imagePath)
     {

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
@@ -110,11 +111,25 @@ public partial class MainWindow
         ImGui.AlignTextToFramePadding();
         ImGui.Text(Strings.T("target_map.label")); ImGui.SameLine(labelW);
         ImGui.SetNextItemWidth(-1);
-        var tmIdx = (int)layer.TargetMap;
-        var tmNames = new[] { Strings.T("target_map.diffuse"), Strings.T("target_map.mask"), Strings.T("target_map.normal") };
-        if (ImGui.Combo("##targetMap", ref tmIdx, tmNames, tmNames.Length))
+
+        // Only list Mask when the group's mtrl actually has g_SamplerMask.
+        // Skin body materials (skin.shpk) don't expose one, so Mask there is a no-op.
+        var supportsMask = previewService.MaterialSupportsMask(group);
+        var tmValues = new List<TargetMap> { TargetMap.Diffuse };
+        var tmLabels = new List<string> { Strings.T("target_map.diffuse") };
+        if (supportsMask)
         {
-            layer.TargetMap = (TargetMap)tmIdx;
+            tmValues.Add(TargetMap.Mask);
+            tmLabels.Add(Strings.T("target_map.mask"));
+        }
+        tmValues.Add(TargetMap.Normal);
+        tmLabels.Add(Strings.T("target_map.normal"));
+
+        var tmIdx = tmValues.IndexOf(layer.TargetMap);
+        if (tmIdx < 0) tmIdx = 0;
+        if (ImGui.Combo("##targetMap", ref tmIdx, tmLabels.ToArray(), tmLabels.Count))
+        {
+            layer.TargetMap = tmValues[tmIdx];
             autoNormalNoticeForIndex = -1;
             // Force next cycle through Penumbra so redirects for the new
             // target texture get mounted (inplace swap can't introduce a new
