@@ -123,4 +123,50 @@ public class DecalLayer
     public bool RequiresRowPair =>
         AffectsDiffuse || AffectsSpecular || AffectsEmissive
         || AffectsRoughness || AffectsMetalness || AffectsSheen;
+
+    public DecalLayer Clone()
+    {
+        return new DecalLayer
+        {
+            Kind = Kind,
+            Name = Name,
+            ImagePath = ImagePath,
+            UvCenter = UvCenter,
+            UvScale = UvScale,
+            RotationDeg = RotationDeg,
+            Opacity = Opacity,
+            BlendMode = BlendMode,
+            Clip = Clip,
+            IsVisible = IsVisible,
+            AffectsDiffuse = AffectsDiffuse,
+            AffectsSpecular = AffectsSpecular,
+            AffectsEmissive = AffectsEmissive,
+            AffectsRoughness = AffectsRoughness,
+            AffectsMetalness = AffectsMetalness,
+            AffectsSheen = AffectsSheen,
+            DiffuseColor = DiffuseColor,
+            SpecularColor = SpecularColor,
+            EmissiveColor = EmissiveColor,
+            EmissiveIntensity = EmissiveIntensity,
+            AnimMode = AnimMode,
+            AnimSpeed = AnimSpeed,
+            AnimAmplitude = AnimAmplitude,
+            EmissiveColorB = EmissiveColorB,
+            AnimFreq = AnimFreq,
+            AnimDirMode = AnimDirMode,
+            AnimDirAngle = AnimDirAngle,
+            AnimDualColor = AnimDualColor,
+            Roughness = Roughness,
+            Metalness = Metalness,
+            SheenRate = SheenRate,
+            SheenTint = SheenTint,
+            SheenAperture = SheenAperture,
+            FadeMask = FadeMask,
+            FadeMaskFalloff = FadeMaskFalloff,
+            GradientAngleDeg = GradientAngleDeg,
+            GradientScale = GradientScale,
+            GradientOffset = GradientOffset,
+            AllocatedRowPair = -1,
+        };
+    }
 }
