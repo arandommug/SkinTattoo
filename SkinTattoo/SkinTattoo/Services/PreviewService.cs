@@ -935,7 +935,10 @@ public class PreviewService : IDisposable
                     bool hasPreviewOnly = false;
                     foreach (var l in layers)
                     {
-                        if (l.IsVisible && !string.IsNullOrEmpty(l.ImagePath) && !l.AffectsDiffuse)
+                        if (!l.IsVisible || string.IsNullOrEmpty(l.ImagePath)) continue;
+                        // Needs preview pass if the layer doesn't paint onto GPU diffuse:
+                        // AffectsDiffuse=false, or TargetMap is Mask/Normal.
+                        if (l.TargetMap != TargetMap.Diffuse || !l.AffectsDiffuse)
                         { hasPreviewOnly = true; break; }
                     }
 
@@ -1958,33 +1961,30 @@ public class PreviewService : IDisposable
 
     private bool CheckCanSwapInPlace(DecalProject project)
     {
-        if (initializedRedirects.Count == 0)
-        {
-            LogCanSwapDeny($"initializedRedirects empty (previewDiskPaths={previewDiskPaths.Count})");
-            CanSwapInPlace = false;
-            return false;
-        }
-
+        // No blanket initializedRedirects check: per-group requirements drive the
+        // decision. A project where every group contributes nothing (invisible,
+        // Mask-only on sampler-less mtrl, etc.) trivially returns true -- async
+        // would just emit an empty batch, which is fine.
         foreach (var group in project.Groups)
         {
             if (string.IsNullOrEmpty(group.DiffuseGamePath) || group.Layers.Count == 0)
                 continue;
 
-            // Required redirects depend on layer composition. A Normal-only group
-            // produces no diffuse redirect, so it mustn't fail-fast on that check.
-            bool needsDiffuse = false, needsNorm = false;
+            // Required redirects depend on layer composition.
+            bool needsDiffuse = false, needsNorm = false, needsMask = false;
             foreach (var l in group.Layers)
             {
                 if (!l.IsVisible || string.IsNullOrEmpty(l.ImagePath)) continue;
                 if (l.TargetMap == TargetMap.Diffuse && l.AffectsDiffuse) needsDiffuse = true;
                 else if (l.TargetMap == TargetMap.Normal) needsNorm = true;
+                else if (l.TargetMap == TargetMap.Mask) needsMask = true;
             }
 
             var hasEmissiveLayers = group.HasEmissiveLayers();
             var hasPbrLayers = group.HasPbrLayers() && MaterialSupportsPbr(group);
 
             // Group that contributes nothing this cycle  -- no need to gate CanSwap on it.
-            if (!needsDiffuse && !needsNorm && !hasEmissiveLayers && !hasPbrLayers)
+            if (!needsDiffuse && !needsNorm && !needsMask && !hasEmissiveLayers && !hasPbrLayers)
                 continue;
 
             if (needsDiffuse)
@@ -2107,7 +2107,10 @@ public class PreviewService : IDisposable
         bool hasPreviewOnly = false;
         foreach (var l in group.Layers)
         {
-            if (l.IsVisible && !string.IsNullOrEmpty(l.ImagePath) && !l.AffectsDiffuse)
+            if (!l.IsVisible || string.IsNullOrEmpty(l.ImagePath)) continue;
+            // Needs preview pass if the layer doesn't paint onto GPU diffuse:
+            // AffectsDiffuse=false, or TargetMap is Mask/Normal.
+            if (l.TargetMap != TargetMap.Diffuse || !l.AffectsDiffuse)
             { hasPreviewOnly = true; break; }
         }
         var diffPreview = hasPreviewOnly
@@ -2425,6 +2428,7 @@ public class PreviewService : IDisposable
     private void ApplyUserMaskOverlay(TargetGroup group, Dictionary<string, string> redirects)
     {
         if (!AnyTargetMapLayer(group.Layers, TargetMap.Mask)) return;
+        DebugServer.AppendLog($"[MaskOverlay] {group.Name}: entry");
         if (string.IsNullOrEmpty(group.MtrlGamePath))
         {
             DebugServer.AppendLog($"[MaskOverlay] {group.Name}: skip (no MtrlGamePath)");
@@ -2435,7 +2439,7 @@ public class PreviewService : IDisposable
         var maskGamePath = GetMaskGamePathFromMtrl(group.MtrlGamePath!, mtrlDisk);
         if (string.IsNullOrEmpty(maskGamePath))
         {
-            DebugServer.AppendLog($"[MaskOverlay] {group.Name}: skip (mask sampler not found in {group.MtrlGamePath})");
+            DebugServer.AppendLog($"[MaskOverlay] {group.Name}: skip (mask sampler not in mtrl; skin body mtrls usually have no g_SamplerMask)");
             return;
         }
 
@@ -2449,7 +2453,11 @@ public class PreviewService : IDisposable
         if (buf == null)
         {
             var img = LoadGameTexture(maskGamePath!);
-            if (img == null) return;
+            if (img == null)
+            {
+                DebugServer.AppendLog($"[MaskOverlay] {group.Name}: skip (LoadGameTexture null for {maskGamePath})");
+                return;
+            }
             buf = (byte[])img.Value.Data.Clone();
             mw = img.Value.Width;
             mh = img.Value.Height;
@@ -2458,12 +2466,17 @@ public class PreviewService : IDisposable
         var result = CpuUvComposite(group.Layers, buf, mw, mh,
             outputBuffer: buf,
             targetFilter: TargetMap.Mask);
-        if (result == null) return;
+        if (result == null)
+        {
+            DebugServer.AppendLog($"[MaskOverlay] {group.Name}: skip (CpuUvComposite null)");
+            return;
+        }
 
         var safeName = MakeSafeFileName(group.DiffuseGamePath!);
         var maskPath = Path.Combine(outputDir, $"preview_{safeName}_mask.tex");
         WriteBgraTexFile(maskPath, result, mw, mh);
         redirects[maskGamePath!] = maskPath;
+        DebugServer.AppendLog($"[MaskOverlay] {group.Name}: wrote {maskGamePath} -> {maskPath}");
     }
 
     private static string MakeSafeFileName(string name)
