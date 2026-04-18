@@ -1,0 +1,64 @@
+{
+  "versions": [
+    {
+      "version": "0.2.0",
+      "date": "2026-04-18",
+      "en": [
+        "Per-layer target map: decals can independently paint Diffuse, Mask, or Normal textures",
+        "Normal / Mask layers preserve normal.alpha so the emissive and ColorTable row-index systems still work",
+        "Auto-detect normal maps on image load: filename hint (_n / _norm / normal) or blue-dominant RGB",
+        "Non-Diffuse target layers hide the Show Decal / Emissive / PBR controls for a cleaner parameter panel"
+      ],
+      "zh": [
+        "按图层选择目标贴图：贴花可独立画到 Diffuse / Mask / Normal 三张贴图",
+        "Normal / Mask 图层不写 normal.alpha，保留给发光与 ColorTable 行号系统",
+        "加载图片时自动识别法线贴图：文件名含 _n / _norm / normal，或 RGB 蓝色主导即命中",
+        "非 Diffuse 目标下自动隐藏显示贴花/发光/PBR 选项，参数面板更简洁"
+      ]
+    },
+    {
+      "version": "0.1.2",
+      "date": "2026-04-10",
+      "en": [
+        "Emissive ripple animation with directional modes and dual-color support",
+        "Emissive gradient animation: smooth transition between two colors",
+        "Iris pulse animation with per-frame CBuffer modulation, flicker animation, fix for hidden layers breaking in-place swap"
+      ],
+      "zh": [
+        "发光水波纹动画，支持方向模式与双色",
+        "发光双色渐变动画：在两种颜色之间平滑过渡",
+        "虹膜脉冲实时调制、闪烁动画，修复隐藏图层导致 in-place 失效"
+      ]
+    },
+    {
+      "version": "0.1.1",
+      "date": "2026-04-05",
+      "en": [
+        "Per-layer emissive pulse animation with independent parameters",
+        "Cross-group visibility toggle + emissive layer feathering preserved across redraws",
+        "Iris mask compositing: patched emissive mask for vanilla eyes missing red-channel glow source"
+      ],
+      "zh": [
+        "贴花发光脉冲动画，每层参数独立",
+        "跨组可见性切换，羽化+发光贴花状态在重绘间保留",
+        "虹膜 mask 合成：为红通道为空的原版眼睛自动生成发光遮罩"
+      ]
+    },
+    {
+      "version": "0.1.0",
+      "date": "2026-03-20",
+      "en": [
+        "Initial release: real-time decal compositing on FFXIV skin textures via Penumbra temporary mods",
+        "UV canvas editor + 3D model preview with ray-picking decal placement",
+        "Per-layer blend modes, clip modes, UV transform, falloff masks",
+        ".pmp mod export for sharing with other users"
+      ],
+      "zh": [
+        "首个版本：通过 Penumbra 临时 mod 在 FFXIV 皮肤贴图上实时合成贴花",
+        "UV 画布编辑器 + 3D 模型预览，支持射线点击放置贴花",
+        "按图层设置混合模式、裁剪、UV 变换、羽化遮罩",
+        ".pmp mod 导出，可分享给其他玩家"
+      ]
+    }
+  ]
+}

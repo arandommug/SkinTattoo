@@ -23,10 +23,14 @@
       "title": "3D 编辑器"
     }
   },
+  "changelog": {
+    "empty": "暂无更新日志"
+  },
   "tab": {
     "settings": "设置",
     "editor": "编辑器",
-    "help": "操作说明"
+    "help": "操作说明",
+    "changelog": "更新日志"
   },
   "button": {
     "add": "添加",

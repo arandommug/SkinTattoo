@@ -39,6 +39,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly DecalImageLoader imageLoader;
     private readonly PreviewService previewService;
     private readonly ModExportService modExportService;
+    private readonly ChangelogService changelogService;
     private readonly DebugServer debugServer;
     private readonly DecalProject project;
     private readonly WindowSystem windowSystem;
@@ -86,7 +87,9 @@ public sealed class Plugin : IDalamudPlugin
         project = new DecalProject();
         project.LoadFromConfig(config);
 
-        mainWindow = new MainWindow(project, previewService, penumbra, config, textureProvider, dataManager, skinMeshResolver);
+        changelogService = new ChangelogService(log);
+
+        mainWindow = new MainWindow(project, previewService, penumbra, config, textureProvider, dataManager, skinMeshResolver, changelogService);
         debugWindow = new DebugWindow();
         modelEditorWindow = new ModelEditorWindow(project, previewService, penumbra, skinMeshResolver, pluginInterface.UiBuilder.DeviceHandle);
 

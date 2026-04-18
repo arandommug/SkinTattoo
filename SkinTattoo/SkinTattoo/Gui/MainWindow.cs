@@ -28,6 +28,7 @@ public partial class MainWindow : Window, IDisposable
     private readonly ITextureProvider textureProvider;
     private readonly IDataManager dataManager;
     private readonly Mesh.SkinMeshResolver skinMeshResolver;
+    private readonly ChangelogService changelogService;
     private readonly FileDialogManager fileDialog = new();
 
     private string imagePathBuf = string.Empty;
@@ -116,7 +117,8 @@ public partial class MainWindow : Window, IDisposable
         Configuration config,
         ITextureProvider textureProvider,
         IDataManager dataManager,
-        Mesh.SkinMeshResolver skinMeshResolver)
+        Mesh.SkinMeshResolver skinMeshResolver,
+        ChangelogService changelogService)
         : base(Strings.T("window.main.title") + "###SkinTattooMain",
                ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)
     {
@@ -127,6 +129,7 @@ public partial class MainWindow : Window, IDisposable
         this.textureProvider = textureProvider;
         this.dataManager = dataManager;
         this.skinMeshResolver = skinMeshResolver;
+        this.changelogService = changelogService;
 
         SizeConstraints = new WindowSizeConstraints
         {
@@ -227,6 +230,13 @@ public partial class MainWindow : Window, IDisposable
             if (ImGui.BeginTabItem(Strings.T("tab.help") + "##mainTab2"))
             {
                 DrawHelpTab();
+                ImGui.EndTabItem();
+            }
+
+            // Tab 3: Changelog
+            if (ImGui.BeginTabItem(Strings.T("tab.changelog") + "##mainTab3"))
+            {
+                DrawChangelogTab();
                 ImGui.EndTabItem();
             }
 

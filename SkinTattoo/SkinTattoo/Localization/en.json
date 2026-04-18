@@ -26,7 +26,11 @@
   "tab": {
     "settings": "Settings",
     "editor": "Editor",
-    "help": "Help"
+    "help": "Help",
+    "changelog": "Changelog"
+  },
+  "changelog": {
+    "empty": "No changelog entries available."
   },
   "button": {
     "add": "Add",
