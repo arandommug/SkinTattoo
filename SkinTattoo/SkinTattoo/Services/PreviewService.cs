@@ -785,13 +785,18 @@ public class PreviewService : IDisposable
         // can detect the patched shader and route to ColorTable path.
         TryDeployPatchedSkinShpk(project, redirects);
 
+        int skippedNoDiffuse = 0, skippedNoLayers = 0, processed = 0;
         foreach (var group in project.Groups)
         {
-            if (string.IsNullOrEmpty(group.DiffuseGamePath)) continue;
-            if (group.Layers.Count == 0) continue;
+            if (string.IsNullOrEmpty(group.DiffuseGamePath)) { skippedNoDiffuse++; continue; }
+            if (group.Layers.Count == 0) { skippedNoLayers++; continue; }
 
             ProcessGroup(group, redirects);
+            processed++;
         }
+        DebugServer.AppendLog($"[Build] groups={project.Groups.Count} processed={processed} " +
+            $"skipNoDiffuse={skippedNoDiffuse} skipNoLayers={skippedNoLayers} " +
+            $"redirects={redirects.Count}");
 
         return redirects;
     }
@@ -2345,24 +2350,38 @@ public class PreviewService : IDisposable
         Dictionary<string, string> redirects)
     {
         if (!AnyTargetMapLayer(group.Layers, TargetMap.Normal)) return;
-        if (string.IsNullOrEmpty(group.NormGamePath)) return;
+        if (string.IsNullOrEmpty(group.NormGamePath))
+        {
+            DebugServer.AppendLog($"[NormOverlay] {group.Name}: skip (no NormGamePath)");
+            return;
+        }
 
         byte[]? buf = null;
         if (redirects.TryGetValue(group.NormGamePath!, out var existing) && File.Exists(existing))
             buf = LoadRgbaResized(existing, w, h);
-        buf ??= LoadRgbaResized(group.OrigNormDiskPath ?? group.NormDiskPath ?? group.NormGamePath!, w, h);
-        if (buf == null) return;
+        var srcPath = group.OrigNormDiskPath ?? group.NormDiskPath ?? group.NormGamePath!;
+        buf ??= LoadRgbaResized(srcPath, w, h);
+        if (buf == null)
+        {
+            DebugServer.AppendLog($"[NormOverlay] {group.Name}: skip (LoadRgbaResized null, src={srcPath})");
+            return;
+        }
 
         var result = CpuUvComposite(group.Layers, buf, w, h,
             outputBuffer: buf,
             targetFilter: TargetMap.Normal,
             preserveAlpha: true);
-        if (result == null) return;
+        if (result == null)
+        {
+            DebugServer.AppendLog($"[NormOverlay] {group.Name}: skip (CpuUvComposite null)");
+            return;
+        }
 
         var safeName = MakeSafeFileName(group.DiffuseGamePath!);
         var normPath = Path.Combine(outputDir, $"preview_{safeName}_n.tex");
         WriteBgraTexFile(normPath, result, w, h);
         redirects[group.NormGamePath!] = normPath;
+        DebugServer.AppendLog($"[NormOverlay] {group.Name}: wrote {group.NormGamePath} -> {normPath}");
     }
 
     /// <summary>
@@ -2373,11 +2392,19 @@ public class PreviewService : IDisposable
     private void ApplyUserMaskOverlay(TargetGroup group, Dictionary<string, string> redirects)
     {
         if (!AnyTargetMapLayer(group.Layers, TargetMap.Mask)) return;
-        if (string.IsNullOrEmpty(group.MtrlGamePath)) return;
+        if (string.IsNullOrEmpty(group.MtrlGamePath))
+        {
+            DebugServer.AppendLog($"[MaskOverlay] {group.Name}: skip (no MtrlGamePath)");
+            return;
+        }
 
         var mtrlDisk = group.OrigMtrlDiskPath ?? group.MtrlDiskPath;
         var maskGamePath = GetMaskGamePathFromMtrl(group.MtrlGamePath!, mtrlDisk);
-        if (string.IsNullOrEmpty(maskGamePath)) return;
+        if (string.IsNullOrEmpty(maskGamePath))
+        {
+            DebugServer.AppendLog($"[MaskOverlay] {group.Name}: skip (mask sampler not found in {group.MtrlGamePath})");
+            return;
+        }
 
         byte[]? buf = null;
         int mw = 0, mh = 0;
