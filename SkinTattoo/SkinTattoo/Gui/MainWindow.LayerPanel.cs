@@ -50,6 +50,29 @@ public partial class MainWindow
             ImGui.SetTooltip(Strings.T("tooltip.delete_group"));
 
         ImGui.SameLine();
+        var selectedGroup = project.SelectedGroupIndex >= 0 && project.SelectedGroupIndex < project.Groups.Count
+            ? project.Groups[project.SelectedGroupIndex] : null;
+        var canCopyGroup = selectedGroup != null && selectedGroup.Layers.Count > 0;
+        using (ImRaii.Disabled(!canCopyGroup))
+        {
+            if (ImGuiComponents.IconButton(12, FontAwesomeIcon.Copy))
+                CopyDecalGroup(selectedGroup!);
+        }
+        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+            ImGui.SetTooltip(Strings.T("menu.copy_decal_group"));
+
+        ImGui.SameLine();
+        var canPasteGroup = copiedGroupLayers != null && project.SelectedGroupIndex >= 0
+                            && project.SelectedGroupIndex < project.Groups.Count;
+        using (ImRaii.Disabled(!canPasteGroup))
+        {
+            if (ImGuiComponents.IconButton(13, FontAwesomeIcon.Paste))
+                PasteDecalGroup(project.SelectedGroupIndex);
+        }
+        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+            ImGui.SetTooltip(Strings.T("menu.paste_decal_group"));
+
+        ImGui.SameLine();
         ImGui.TextDisabled($"({project.Groups.Count})");
 
         ImGui.Separator();
@@ -343,6 +366,9 @@ public partial class MainWindow
             copiedGroupLayers.Add(layer.Clone());
 
         copiedGroupSelectedLayerIndex = group.SelectedLayerIndex;
+
+        var (sw, sh) = previewService.GetBaseTextureSize(group);
+        copiedGroupSrcAspect = (sw > 0 && sh > 0) ? (float)sw / sh : 0f;
     }
 
     private void PasteDecalGroup(int targetGroupIndex)
@@ -365,9 +391,22 @@ public partial class MainWindow
         foreach (var layer in targetGroup.Layers)
             previewService.ForceReleaseRowPair(targetGroup, layer);
 
+        var (dw, dh) = previewService.GetBaseTextureSize(targetGroup);
+        float dstAspect = (dw > 0 && dh > 0) ? (float)dw / dh : 0f;
+        // Remap UvScale.Y so decals keep their pixel-space aspect across
+        // materials with different texture sizes (e.g. 1024x1024 -> 1024x2048).
+        bool needRescale = copiedGroupSrcAspect > 0f && dstAspect > 0f
+                           && MathF.Abs(copiedGroupSrcAspect - dstAspect) > 1e-4f;
+
         var clipboardGroup = new TargetGroup { SelectedLayerIndex = copiedGroupSelectedLayerIndex };
         foreach (var layer in copiedGroupLayers)
-            clipboardGroup.Layers.Add(layer.Clone());
+        {
+            var cloned = layer.Clone();
+            if (needRescale)
+                cloned.UvScale = new Vector2(cloned.UvScale.X,
+                    cloned.UvScale.Y * dstAspect / copiedGroupSrcAspect);
+            clipboardGroup.Layers.Add(cloned);
+        }
         targetGroup.ReplaceLayersFrom(clipboardGroup);
 
         project.SelectedGroupIndex = targetGroupIndex;

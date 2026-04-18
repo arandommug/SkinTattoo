@@ -76,6 +76,7 @@ public partial class MainWindow : Window, IDisposable
 
     private List<DecalLayer>? copiedGroupLayers;
     private int copiedGroupSelectedLayerIndex = -1;
+    private float copiedGroupSrcAspect;
 
     // Init phase
     private enum InitPhase { Pending, Loading, Done }
