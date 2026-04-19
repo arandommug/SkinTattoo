@@ -38,6 +38,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly MeshExtractor meshExtractor;
     private readonly SkinMeshResolver skinMeshResolver;
     private readonly DecalImageLoader imageLoader;
+    private readonly LibraryService libraryService;
     private readonly PreviewService previewService;
     private readonly ModExportService modExportService;
     private readonly ChangelogService changelogService;
@@ -48,6 +49,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly DebugWindow debugWindow;
     private readonly ModelEditorWindow modelEditorWindow;
     private readonly ModExportWindow modExportWindow;
+    private readonly LibraryWindow libraryWindow;
 
     private DateTime lastAutoSave = DateTime.MinValue;
     private const double AutoSaveIntervalSec = 30.0;
@@ -77,6 +79,8 @@ public sealed class Plugin : IDalamudPlugin
         skinMeshResolver = new SkinMeshResolver(meshExtractor);
         imageLoader = new DecalImageLoader(log, dataManager);
 
+        libraryService = new LibraryService(log, imageLoader, pluginInterface.GetPluginConfigDirectory());
+
         var outputDir = Path.Combine(pluginInterface.GetPluginConfigDirectory(), "preview");
         previewService = new PreviewService(
             meshExtractor, imageLoader,
@@ -87,18 +91,21 @@ public sealed class Plugin : IDalamudPlugin
 
         project = new DecalProject();
         project.LoadFromConfig(config);
+        project.ReconcileLibraryRefs(libraryService);
 
         changelogService = new ChangelogService(log);
 
-        mainWindow = new MainWindow(project, previewService, penumbra, config, textureProvider, dataManager, skinMeshResolver, changelogService);
+        mainWindow = new MainWindow(project, previewService, penumbra, config, textureProvider, dataManager, skinMeshResolver, changelogService, libraryService);
         debugWindow = new DebugWindow();
         modelEditorWindow = new ModelEditorWindow(project, previewService, penumbra, skinMeshResolver, pluginInterface.UiBuilder.DeviceHandle);
 
         modExportWindow = new ModExportWindow(project, modExportService, config);
+        libraryWindow = new LibraryWindow(libraryService, textureProvider, config);
 
         mainWindow.DebugWindowRef = debugWindow;
         mainWindow.ModelEditorWindowRef = modelEditorWindow;
         mainWindow.ModExportWindowRef = modExportWindow;
+        mainWindow.LibraryWindowRef = libraryWindow;
         mainWindow.InitializeRequested = InitializeProjectPreview;
 
         debugServer = new DebugServer(config, project, penumbra, previewService, dataManager, modExportService, skinMeshResolver, textureSwap);
@@ -110,6 +117,7 @@ public sealed class Plugin : IDalamudPlugin
         windowSystem.AddWindow(debugWindow);
         windowSystem.AddWindow(modelEditorWindow);
         windowSystem.AddWindow(modExportWindow);
+        windowSystem.AddWindow(libraryWindow);
 
         pluginInterface.UiBuilder.Draw += DrawUi;
         pluginInterface.UiBuilder.OpenConfigUi += OpenConfigUi;

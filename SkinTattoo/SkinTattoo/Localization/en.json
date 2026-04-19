@@ -24,6 +24,23 @@
     },
     "editor3d": {
       "title": "3D Editor"
+    },
+    "library": {
+      "title": "Decal Library"
+    }
+  },
+  "library": {
+    "search_hint": "Search filename...",
+    "empty": "Library is empty. Click the button in the top-left to import.",
+    "loading": "Loading",
+    "delete_prompt": "Delete \"{0}\"?\nLayers using this resource will not be cleared automatically.",
+    "tooltip": {
+      "import": "Import new resource",
+      "used_count": "Used: {0}"
+    },
+    "menu": {
+      "apply": "Apply to current layer",
+      "delete": "Remove from library"
     }
   },
   "tab": {
@@ -66,7 +83,11 @@
     "path": "Paths",
     "remove": "Remove",
     "save_mod": "Save Mod",
-    "browse_output": "Browse..."
+    "browse_output": "Browse...",
+    "confirm": "Confirm",
+    "cancel": "Cancel",
+    "browse_image": "Browse File",
+    "open_library": "Library"
   },
   "tooltip": {
     "editor3d": "3D Decal Editor",
@@ -111,7 +132,8 @@
     "copy_row": "Right-click to copy this line",
     "show_hide_model": "Show/Hide",
     "re_resolve_tip": "Re-detect current character equipment/mod state and refresh mesh",
-    "browse_image": "Browse..."
+    "browse_image": "Browse...",
+    "open_library": "Open decal library"
   },
   "label": {
     "diffuse": "Diffuse",

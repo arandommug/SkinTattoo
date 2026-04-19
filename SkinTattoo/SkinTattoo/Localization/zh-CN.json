@@ -24,6 +24,23 @@
     },
     "editor3d": {
       "title": "3D 编辑器"
+    },
+    "library": {
+      "title": "贴花素材库"
+    }
+  },
+  "library": {
+    "search_hint": "搜索文件名...",
+    "empty": "素材库为空，点击左上角按钮导入。",
+    "loading": "加载中",
+    "delete_prompt": "确认删除 \"{0}\"？\n正在使用该素材的图层不会被自动清理。",
+    "tooltip": {
+      "import": "导入新素材",
+      "used_count": "使用次数: {0}"
+    },
+    "menu": {
+      "apply": "应用到当前图层",
+      "delete": "从素材库中删除"
     }
   },
   "changelog": {
@@ -66,7 +83,11 @@
     "path": "路径",
     "remove": "移除",
     "save_mod": "保存 Mod",
-    "browse_output": "浏览…"
+    "browse_output": "浏览…",
+    "confirm": "确认",
+    "cancel": "取消",
+    "browse_image": "浏览文件",
+    "open_library": "素材库"
   },
   "tooltip": {
     "editor3d": "3D 贴花编辑器",
@@ -111,7 +132,8 @@
     "copy_row": "右键复制此行",
     "show_hide_model": "显示/隐藏",
     "re_resolve_tip": "重新检测角色当前装备/mod 状态并刷新网格",
-    "browse_image": "浏览..."
+    "browse_image": "浏览...",
+    "open_library": "打开贴花素材库"
   },
   "label": {
     "diffuse": "贴图",

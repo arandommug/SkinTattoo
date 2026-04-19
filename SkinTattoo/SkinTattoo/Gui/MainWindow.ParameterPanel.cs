@@ -66,17 +66,8 @@ public partial class MainWindow
     {
         if (!ImGui.CollapsingHeader(Strings.T("section.image"), ImGuiTreeNodeFlags.DefaultOpen)) return;
 
-        ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 30);
-        if (ImGui.InputText("##ImagePath", ref imagePathBuf, 512))
-        {
-            layer.ImagePath = imagePathBuf;
-            AutoFitLayerScale(group, layer);
-            lastEditedLayerIndex = idx;
-            TryAutoDetectNormalMap(layer);
-            MarkPreviewDirty();
-        }
-        ImGui.SameLine();
-        if (ImGuiComponents.IconButton(20, FontAwesomeIcon.FolderOpen))
+        var halfBtnW = (ImGui.GetContentRegionAvail().X - ImGui.GetStyle().ItemSpacing.X) * 0.5f;
+        if (ImGui.Button(Strings.T("button.browse_image") + "##ImgBrowseBtn", new Vector2(halfBtnW, 0f)))
         {
             var capturedGi = project.SelectedGroupIndex;
             var capturedLi = idx;
@@ -92,9 +83,19 @@ public partial class MainWindow
                         {
                             var path = paths[0];
                             var picked = g.Layers[capturedLi];
-                            picked.ImagePath = path;
+                            var entry = library?.ImportFromPath(path);
+                            if (entry != null)
+                            {
+                                picked.ImageHash = entry.Hash;
+                                picked.ImagePath = library!.ResolveDiskPath(entry.Hash) ?? path;
+                            }
+                            else
+                            {
+                                picked.ImagePath = path;
+                                picked.ImageHash = null;
+                            }
                             AutoFitLayerScale(g, picked);
-                            imagePathBuf = path;
+                            imagePathBuf = picked.ImagePath ?? string.Empty;
                             lastEditedLayerIndex = capturedLi;
                             config.LastImageDir = System.IO.Path.GetDirectoryName(path);
                             config.Save();
@@ -106,6 +107,22 @@ public partial class MainWindow
                 1, config.LastImageDir, false);
         }
         if (ImGui.IsItemHovered()) ImGui.SetTooltip(Strings.T("tooltip.browse_image"));
+
+        ImGui.SameLine();
+        if (ImGui.Button(Strings.T("button.open_library") + "##ImgLibBtn", new Vector2(halfBtnW, 0f)))
+            OpenLibraryForLayer(group, layer, idx);
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip(Strings.T("tooltip.open_library"));
+
+        ImGui.SetNextItemWidth(-1);
+        if (ImGui.InputText("##ImagePath", ref imagePathBuf, 512))
+        {
+            layer.ImagePath = imagePathBuf;
+            layer.ImageHash = null;
+            AutoFitLayerScale(group, layer);
+            lastEditedLayerIndex = idx;
+            TryAutoDetectNormalMap(layer);
+            MarkPreviewDirty();
+        }
 
         const float labelW = 80f;
         ImGui.AlignTextToFramePadding();
@@ -141,6 +158,33 @@ public partial class MainWindow
 
         if (autoNormalNoticeForIndex == idx && layer.TargetMap == TargetMap.Normal)
             ImGui.TextColored(new Vector4(0.5f, 0.85f, 1f, 1f), Strings.T("target_map.auto_normal_detected"));
+    }
+
+    private void OpenLibraryForLayer(TargetGroup group, DecalLayer layer, int idx)
+    {
+        if (LibraryWindowRef == null || library == null) return;
+
+        var capturedGi = project.SelectedGroupIndex;
+        var capturedLi = idx;
+        LibraryWindowRef.OnPicked = entry =>
+        {
+            if (capturedGi >= project.Groups.Count) return;
+            var g = project.Groups[capturedGi];
+            if (capturedLi >= g.Layers.Count) return;
+            var picked = g.Layers[capturedLi];
+            var resolved = library.ResolveDiskPath(entry.Hash);
+            if (resolved == null) return;
+            picked.ImageHash = entry.Hash;
+            picked.ImagePath = resolved;
+            library.Touch(entry.Hash);
+            AutoFitLayerScale(g, picked);
+            imagePathBuf = resolved;
+            lastEditedLayerIndex = capturedLi;
+            TryAutoDetectNormalMap(picked);
+            MarkPreviewDirty();
+        };
+        LibraryWindowRef.IsOpen = true;
+        LibraryWindowRef.BringToFront();
     }
 
     private void TryAutoDetectNormalMap(DecalLayer layer)

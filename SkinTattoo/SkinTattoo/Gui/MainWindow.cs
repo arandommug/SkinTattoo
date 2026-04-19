@@ -29,6 +29,7 @@ public partial class MainWindow : Window, IDisposable
     private readonly IDataManager dataManager;
     private readonly Mesh.SkinMeshResolver skinMeshResolver;
     private readonly ChangelogService changelogService;
+    private readonly LibraryService? library;
     private readonly FileDialogManager fileDialog = new();
 
     private string imagePathBuf = string.Empty;
@@ -158,6 +159,7 @@ public partial class MainWindow : Window, IDisposable
     public DebugWindow? DebugWindowRef { get; set; }
     public ModelEditorWindow? ModelEditorWindowRef { get; set; }
     public ModExportWindow? ModExportWindowRef { get; set; }
+    public LibraryWindow? LibraryWindowRef { get; set; }
 
     public Func<Task>? InitializeRequested { get; set; }
 
@@ -169,7 +171,8 @@ public partial class MainWindow : Window, IDisposable
         ITextureProvider textureProvider,
         IDataManager dataManager,
         Mesh.SkinMeshResolver skinMeshResolver,
-        ChangelogService changelogService)
+        ChangelogService changelogService,
+        LibraryService? library = null)
         : base(Strings.T("window.main.title") + "###SkinTattooMain",
                ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)
     {
@@ -181,6 +184,7 @@ public partial class MainWindow : Window, IDisposable
         this.dataManager = dataManager;
         this.skinMeshResolver = skinMeshResolver;
         this.changelogService = changelogService;
+        this.library = library;
 
         SizeConstraints = new WindowSizeConstraints
         {

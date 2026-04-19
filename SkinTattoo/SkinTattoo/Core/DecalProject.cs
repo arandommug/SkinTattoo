@@ -1,5 +1,8 @@
+using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Numerics;
+using SkinTattoo.Services;
 
 namespace SkinTattoo.Core;
 
@@ -63,6 +66,7 @@ public class DecalProject
                 {
                     Name = l.Name,
                     ImagePath = l.ImagePath,
+                    ImageHash = l.ImageHash,
                     UvCenterX = l.UvCenter.X,
                     UvCenterY = l.UvCenter.Y,
                     UvScaleX = l.UvScale.X,
@@ -145,6 +149,7 @@ public class DecalProject
                 {
                     Name = s.Name,
                     ImagePath = s.ImagePath,
+                    ImageHash = s.ImageHash,
                     UvCenter = new Vector2(s.UvCenterX, s.UvCenterY),
                     UvScale = new Vector2(s.UvScaleX, s.UvScaleY),
                     RotationDeg = s.RotationDeg,
@@ -190,5 +195,35 @@ public class DecalProject
         }
         SelectedGroupIndex = config.SelectedGroupIndex >= 0 && config.SelectedGroupIndex < Groups.Count
             ? config.SelectedGroupIndex : (Groups.Count > 0 ? 0 : -1);
+    }
+
+    /// <summary>After LoadFromConfig: resolve each layer's ImageHash to a library
+    /// disk path, overwriting stale ImagePath. Also backfills ImageHash for old
+    /// projects whose on-disk source still exists, so future saves become portable.</summary>
+    public void ReconcileLibraryRefs(LibraryService library)
+    {
+        foreach (var g in Groups)
+        foreach (var l in g.Layers)
+        {
+            if (!string.IsNullOrEmpty(l.ImageHash))
+            {
+                var resolved = library.ResolveDiskPath(l.ImageHash);
+                if (resolved != null)
+                {
+                    l.ImagePath = resolved;
+                    continue;
+                }
+                l.ImageHash = null;
+            }
+            if (!string.IsNullOrEmpty(l.ImagePath) && File.Exists(l.ImagePath))
+            {
+                var entry = library.ImportFromPath(l.ImagePath);
+                if (entry != null)
+                {
+                    l.ImageHash = entry.Hash;
+                    l.ImagePath = library.ResolveDiskPath(entry.Hash) ?? l.ImagePath;
+                }
+            }
+        }
     }
 }

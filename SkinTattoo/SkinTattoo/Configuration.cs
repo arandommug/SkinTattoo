@@ -10,6 +10,7 @@ public class SavedLayer
 {
     public string Name { get; set; } = "New Decal";
     public string? ImagePath { get; set; }
+    public string? ImageHash { get; set; }
     public float UvCenterX { get; set; } = 0.5f;
     public float UvCenterY { get; set; } = 0.5f;
     public float UvScaleX { get; set; } = 0.2f;

@@ -67,6 +67,7 @@ public class DecalLayer
 
     public string Name { get; set; } = "New Decal";
     public string? ImagePath { get; set; }
+    public string? ImageHash { get; set; }
 
     public Vector2 UvCenter { get; set; } = new(0.5f, 0.5f);
     public Vector2 UvScale { get; set; } = new(0.2f, 0.2f);
@@ -131,6 +132,7 @@ public class DecalLayer
             Kind = Kind,
             Name = Name,
             ImagePath = ImagePath,
+            ImageHash = ImageHash,
             UvCenter = UvCenter,
             UvScale = UvScale,
             RotationDeg = RotationDeg,
