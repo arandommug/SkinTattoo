@@ -95,7 +95,7 @@ public sealed class Plugin : IDalamudPlugin
 
         changelogService = new ChangelogService(log);
 
-        mainWindow = new MainWindow(project, previewService, penumbra, config, textureProvider, dataManager, skinMeshResolver, changelogService, libraryService);
+        mainWindow = new MainWindow(project, previewService, penumbra, config, textureProvider, dataManager, skinMeshResolver, changelogService, libraryService, imageLoader);
         debugWindow = new DebugWindow();
         modelEditorWindow = new ModelEditorWindow(project, previewService, penumbra, skinMeshResolver, pluginInterface.UiBuilder.DeviceHandle);
 

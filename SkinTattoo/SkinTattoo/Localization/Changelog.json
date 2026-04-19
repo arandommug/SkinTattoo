@@ -1,6 +1,16 @@
 {
   "versions": [
     {
+      "version": "0.2.4",
+      "date": "2026-04-19",
+      "en": [
+        { "text": "Reworked the preview texture decoding pipeline to support BC7" }
+      ],
+      "zh": [
+        { "text": "重做预览纹理解码管线，支持 BC7" }
+      ]
+    },
+    {
       "version": "0.2.3",
       "date": "2026-04-19",
       "en": [

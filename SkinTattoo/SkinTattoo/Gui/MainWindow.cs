@@ -30,6 +30,7 @@ public partial class MainWindow : Window, IDisposable
     private readonly Mesh.SkinMeshResolver skinMeshResolver;
     private readonly ChangelogService changelogService;
     private readonly LibraryService? library;
+    private readonly DecalImageLoader? imageLoader;
     private readonly FileDialogManager fileDialog = new();
 
     private string imagePathBuf = string.Empty;
@@ -172,7 +173,8 @@ public partial class MainWindow : Window, IDisposable
         IDataManager dataManager,
         Mesh.SkinMeshResolver skinMeshResolver,
         ChangelogService changelogService,
-        LibraryService? library = null)
+        LibraryService? library = null,
+        DecalImageLoader? imageLoader = null)
         : base(Strings.T("window.main.title") + "###SkinTattooMain",
                ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)
     {
@@ -185,6 +187,7 @@ public partial class MainWindow : Window, IDisposable
         this.skinMeshResolver = skinMeshResolver;
         this.changelogService = changelogService;
         this.library = library;
+        this.imageLoader = imageLoader;
 
         SizeConstraints = new WindowSizeConstraints
         {
@@ -954,5 +957,6 @@ public partial class MainWindow : Window, IDisposable
     public void Dispose()
     {
         InitializeRequested = null;
+        DisposeDiskTexPreviewCache();
     }
 }

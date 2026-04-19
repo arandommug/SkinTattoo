@@ -5,6 +5,8 @@ using System.Linq;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
+using Dalamud.Interface.Textures;
+using Dalamud.Interface.Textures.TextureWraps;
 using Dalamud.Interface.Utility.Raii;
 using Penumbra.Api.Enums;
 using Penumbra.Api.Helpers;
@@ -162,11 +164,68 @@ public partial class MainWindow
             foreach (var topNode in tree.Nodes)
                 ScanForCards(topNode, null, cards);
 
-        return cards.Values
+        var list = cards.Values
             .Where(c => c.ShaderName != null
                         && (c.ShaderName.StartsWith("skin", StringComparison.Ordinal) || c.ShaderName == "iris"))
             .Where(c => !IsUnusedBodyFallback(c))
+            .Where(c => !IsGhostCard(c))
             .ToList();
+
+        DisambiguateCardNames(list);
+        return list;
+    }
+
+    /// <summary>
+    /// A card is a ghost when the resolver can only reach its mtrl via the
+    /// SqPack-vanilla fallback (all MeshSlots have DiskPath=null). That means
+    /// the user's currently-loaded mods don't actually have a disk mdl whose
+    /// material slots reference this mtrl — picking the card produces a mesh
+    /// (loaded from vanilla SqPack) whose UV layout doesn't match the
+    /// mod-replaced texture, and the 3D preview comes out black/garbled.
+    /// Body/face/hair/tail only; iris and other slots bypass this check.
+    /// </summary>
+    private bool IsGhostCard(MtrlCardInfo card)
+    {
+        if (card.MtrlPaths.Count == 0) return false;
+        var mtrlPath = card.MtrlPaths[0];
+        var parsed = TexPathParser.ParseFromMtrl(mtrlPath);
+        if (!parsed.IsValid) return false;
+        if (parsed.SlotKind != "body" && parsed.SlotKind != "face"
+            && parsed.SlotKind != "hair" && parsed.SlotKind != "tail")
+            return false;
+
+        var resolution = GetCachedResolution(mtrlPath);
+        if (resolution == null || !resolution.Success) return false;
+        if (resolution.MeshSlots.Count == 0) return false;
+        return resolution.MeshSlots.All(s => string.IsNullOrEmpty(s.DiskPath));
+    }
+
+    /// <summary>Append mtrl variant suffix (e.g. "[bibo]" / "[a]") when multiple
+    /// cards share the same Penumbra-derived display name. Without this the user
+    /// can't tell a Bibo+ body card apart from a vanilla-fallback ghost card.</summary>
+    private static void DisambiguateCardNames(List<MtrlCardInfo> cards)
+    {
+        var groups = cards.GroupBy(c => c.Name).Where(g => g.Count() > 1);
+        foreach (var g in groups)
+        {
+            foreach (var c in g)
+            {
+                var variant = ExtractMtrlVariant(c.MtrlPaths.FirstOrDefault());
+                if (!string.IsNullOrEmpty(variant))
+                    c.Name = $"{c.Name} [{variant}]";
+            }
+        }
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex MtrlVariantRegex = new(
+        @"mt_c\d{4}[bfthz]\d{4}_(?<v>[a-z0-9_]+)\.mtrl$",
+        System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+    private static string? ExtractMtrlVariant(string? mtrlPath)
+    {
+        if (string.IsNullOrEmpty(mtrlPath)) return null;
+        var m = MtrlVariantRegex.Match(mtrlPath);
+        return m.Success ? m.Groups["v"].Value.ToLowerInvariant() : null;
     }
 
     /// <summary>
@@ -582,6 +641,55 @@ public partial class MainWindow
         ImGui.PopID();
     }
 
+    // Cache of disk-tex-loaded IDalamudTextureWrap by absolute path + mtime.
+    // Dalamud's built-in .tex loader misses some DT-era BC7 files; we route
+    // through DecalImageLoader (Lumina w/ BCnEncoder) and build a wrap via
+    // CreateFromRaw. Own the wrap lifetime; dispose on MainWindow.Dispose.
+    private sealed record DiskTexCacheEntry(IDalamudTextureWrap Wrap, DateTime Mtime, long Size);
+    private readonly Dictionary<string, DiskTexCacheEntry> diskTexPreviewCache =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    private IDalamudTextureWrap? GetDiskTexWrap(string absPath)
+    {
+        if (imageLoader == null || string.IsNullOrEmpty(absPath)) return null;
+        FileInfo fi;
+        try { fi = new FileInfo(absPath); if (!fi.Exists) return null; }
+        catch { return null; }
+
+        if (diskTexPreviewCache.TryGetValue(absPath, out var hit)
+            && hit.Mtime == fi.LastWriteTimeUtc && hit.Size == fi.Length)
+            return hit.Wrap;
+
+        if (hit != null)
+        {
+            try { hit.Wrap.Dispose(); } catch { }
+            diskTexPreviewCache.Remove(absPath);
+        }
+
+        var img = imageLoader.LoadImage(absPath, useCache: false);
+        if (!img.HasValue) return null;
+        var (data, w, h) = img.Value;
+        try
+        {
+            var wrap = textureProvider.CreateFromRaw(
+                RawImageSpecification.Rgba32(w, h),
+                data,
+                $"SkinTattoo/preview/{Path.GetFileName(absPath)}");
+            diskTexPreviewCache[absPath] = new DiskTexCacheEntry(wrap, fi.LastWriteTimeUtc, fi.Length);
+            return wrap;
+        }
+        catch { return null; }
+    }
+
+    private void DisposeDiskTexPreviewCache()
+    {
+        foreach (var e in diskTexPreviewCache.Values)
+        {
+            try { e.Wrap.Dispose(); } catch { }
+        }
+        diskTexPreviewCache.Clear();
+    }
+
     private void DrawTexPreview(string label, string gamePath, string actualPath, Vector2 size)
     {
         ImGui.BeginGroup();
@@ -595,11 +703,16 @@ public partial class MainWindow
             {
                 var loadPath = !string.IsNullOrEmpty(actualPath) && Path.IsPathRooted(actualPath)
                     ? actualPath : gamePath;
-                var normalized = loadPath.Replace('\\', '/');
-                var shared = Path.IsPathRooted(loadPath)
-                    ? textureProvider.GetFromFile(loadPath)
-                    : textureProvider.GetFromGame(normalized);
-                var wrap = shared.GetWrapOrDefault();
+                IDalamudTextureWrap? wrap;
+                if (Path.IsPathRooted(loadPath))
+                {
+                    wrap = GetDiskTexWrap(loadPath);
+                }
+                else
+                {
+                    var normalized = loadPath.Replace('\\', '/');
+                    wrap = textureProvider.GetFromGame(normalized).GetWrapOrDefault();
+                }
                 if (wrap != null)
                 {
                     ImGui.Image(wrap.Handle, size);
