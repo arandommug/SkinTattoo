@@ -40,7 +40,7 @@ C  slot=1  size=   4  g_CommonParameter           同上
 C  slot=2  size=   5  g_PbrParameterCommon        同上
 C  slot=3  size=  59  g_CameraParameter           同上
 C  slot=4  size=  11  g_InstanceParameter         同上
-C  slot=5  size=   1  g_MaterialParameterDynamic  (0x77F6BFB3)  ★ NEW
+C  slot=5  size=   1  g_MaterialParameterDynamic  (0x77F6BFB3)  * NEW
 C  slot=6  size=  10  g_AmbientParam              (shifted from slot 5)
 C  slot=7  size=2048  g_ShaderTypeParameter       (shifted from slot 6)
 ```
@@ -62,10 +62,10 @@ struct MaterialParameter {
 ## 3.3 输入签名（TEXCOORD）的细微但关键差异
 
 ```
-dcl_input_ps linear v2.xy         ← Face → ★ 其实是 Body 这样写
+dcl_input_ps linear v2.xy         ← Face → * 其实是 Body 这样写
 dcl_input_ps linear v2.xy         ← Body
 dcl_input_ps linear v2.xy         ← BodyJJM
-dcl_input_ps linear v2.xyzw       ← Face   ★
+dcl_input_ps linear v2.xyzw       ← Face   *
 dcl_input_ps linear v2.xyzw       ← Emissive
 ```
 
@@ -98,7 +98,7 @@ dcl_input_ps linear v2.xyzw       ← Emissive
 
 ```
  752  mad r0.yzw, r3.xxyz, r0.yyyy, r4.xxyz   // 将某个光照项累加到 r0.yzw
- 753  mul r1.xyz, r1.xyzx, cb5[0].xyzx        // ★ r1.xyz *= g_EmissiveColor
+ 753  mul r1.xyz, r1.xyzx, cb5[0].xyzx        // * r1.xyz *= g_EmissiveColor
  754  dp3 r2.w, r2.xyzx, l(0.29891, 0.58661, 0.11448, 0)  // Rec.709 亮度
  755  max r2.w, r2.w, l(1.000000)
  756  mul r3.xyz, r1.xyzx, r2.wwww            // r3.xyz = 调制后的 r1 × 亮度

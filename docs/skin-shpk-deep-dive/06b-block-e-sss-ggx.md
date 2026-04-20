@@ -220,7 +220,7 @@ F = F₀ + (1 - F₀) × pow(1 - cosθ_half, 5)
 446  mul r11.w, r11.w, r11.w                                ; r11.x⁴
 447  mul r11.x, r11.x, r11.w                                ; r11.x⁵
 448  min r11.x, r11.x, l(1.000000)
-449  mad r11.x, r11.x, l(0.953479), l(0.046521)             ; ★ 又一个 Schlick Fresnel
+449  mad r11.x, r11.x, l(0.953479), l(0.046521)             ; * 又一个 Schlick Fresnel
 450  add r11.x, -r11.x, l(1.000000)                         ; 1 - F
 451  mul r11.x, r11.x, r11.x                                ; (1-F)²
 
@@ -256,7 +256,7 @@ F = F₀ + (1 - F₀) × pow(1 - cosθ_half, 5)
 470  mul r4.w, r4.w, r4.w                                    ; r1.w⁴
 471  mul r1.w, r1.w, r4.w                                    ; r1.w⁵
 472  min r1.w, r1.w, l(1.000000)
-473  mad r1.w, r1.w, l(0.953479), l(0.046521)                ; ★ Schlick Fresnel #3
+473  mad r1.w, r1.w, l(0.953479), l(0.046521)                ; * Schlick Fresnel #3
 474  add r4.w, -r1.w, l(1.000000)
 475  mul r4.w, r4.w, r4.w                                    ; (1-F)²
 476  mul r1.w, r1.w, r4.w                                    ; F × (1-F)²  — 典型的"透射"权重

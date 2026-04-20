@@ -77,12 +77,12 @@
 
 | Sampler | skin.shpk | character.shpk |
 |---|---|---|
-| g_SamplerDiffuse (漫反射) | ✅ | ✅ |
-| g_SamplerNormal (法线) | ✅ | ✅ |
-| g_SamplerMask (遮罩) | ❌ | ✅ |
-| g_SamplerSpecular (高光) | ❌ | ✅ |
-| g_SamplerIndex (索引) | ❌ | ✅ |
-| g_SamplerTable (ColorTable) | ❌ | ✅ |
+| g_SamplerDiffuse (漫反射) | [x] | [x] |
+| g_SamplerNormal (法线) | [x] | [x] |
+| g_SamplerMask (遮罩) | [fail] | [x] |
+| g_SamplerSpecular (高光) | [fail] | [x] |
+| g_SamplerIndex (索引) | [fail] | [x] |
+| g_SamplerTable (ColorTable) | [fail] | [x] |
 
 **转换需要补全至少 4 个 sampler**。skin mtrl 只引用 diffuse + normal 两个纹理；character mtrl 需要 mask + specular + index + ColorTable 纹理。
 
@@ -149,10 +149,10 @@ character.shpk 设计给金属/布料/皮革等装备材质，没有 SSS → 皮
 
 | 特性 | character.shpk | charactertattoo.shpk | characterlegacy.shpk |
 |---|---|---|---|
-| ColorTable | ✅ 32 行 (Dawntrail) | ✅ (推测) | ✅ 16 行 (legacy) |
-| SSS/皮肤渲染 | ❌ 装备级渲染 | ❓ 未知（名字暗示适合身体） | ❌ 装备级 |
+| ColorTable | [x] 32 行 (Dawntrail) | [x] (推测) | [x] 16 行 (legacy) |
+| SSS/皮肤渲染 | [fail] 装备级渲染 | ? 未知（名字暗示适合身体） | [fail] 装备级 |
 | 独占常量 | 2 个 unknown + g_ScatteringLevel | 无 | 无 |
-| 引擎内建 | ✅ slot 1 | ✅ 已收录在 57 shpk 列表 | ✅ |
+| 引擎内建 | [x] slot 1 | [x] 已收录在 57 shpk 列表 | [x] |
 | 社区使用案例 | 大量 | 极少/未知 | 中等 |
 | 视觉风险 | 高（皮肤→塑料） | **中（可能有皮肤特化？）** | 高 |
 
@@ -176,12 +176,12 @@ character.shpk 设计给金属/布料/皮革等装备材质，没有 SSS → 皮
 
 | 困难 | 严重程度 | 说明 |
 |---|---|---|
-| **皮肤颜色丢失** | 🔴 高 | CustomizeParameter.SkinColor 可能不再被读取，角色皮肤变白 |
-| **SSS 丢失** | 🟡 中 | 皮肤失去半透明质感，看起来像塑料 |
-| **补全纹理** | 🟢 低 | 需要生成 mask/specular/index 占位纹理，工作量可控 |
-| **ColorTable 初始化** | 🟢 低 | 需要写入默认 ColorTable 数据到 mtrl，已有 API |
-| **兼容性测试** | 🟡 中 | 需要测试所有种族/性别/体型的渲染正确性 |
-| **与 body mod 兼容** | 🟡 中 | 第三方 body mod 可能依赖 skin.shpk 特有行为 |
+| **皮肤颜色丢失** |  高 | CustomizeParameter.SkinColor 可能不再被读取，角色皮肤变白 |
+| **SSS 丢失** |  中 | 皮肤失去半透明质感，看起来像塑料 |
+| **补全纹理** |  低 | 需要生成 mask/specular/index 占位纹理，工作量可控 |
+| **ColorTable 初始化** |  低 | 需要写入默认 ColorTable 数据到 mtrl，已有 API |
+| **兼容性测试** |  中 | 需要测试所有种族/性别/体型的渲染正确性 |
+| **与 body mod 兼容** |  中 | 第三方 body mod 可能依赖 skin.shpk 特有行为 |
 
 ### 4.3 charactertattoo.shpk 是否有 SSS？
 
@@ -298,9 +298,9 @@ Row 9-15: Diff=[1,1,1] Spec=[1,1,1] Emis=[0,0,0]  (默认白色)
 
 | Mod | 方法 | 是否换 shader |
 |---|---|---|
-| [Colorset tattoo AetherFlux](https://www.xivmodarchive.com/modid/102593) | ALum3 框架 + Diffuse Alpha mask + 16 行 colorset | ❌ 仍然是 skin.shpk + ALum |
-| [Glowing Tattoos](https://www.xivmodarchive.com/modid/74793) | ALum 框架 + Bibo+ 纹理 | ❌ skin.shpk + ALum |
-| [TBSE Specular Restored](https://www.xivmodarchive.com/modid/88778) | ALum3 + multi 纹理 + 发光纹身参数 | ❌ skin.shpk (HRO key) + ALum |
+| [Colorset tattoo AetherFlux](https://www.xivmodarchive.com/modid/102593) | ALum3 框架 + Diffuse Alpha mask + 16 行 colorset | [fail] 仍然是 skin.shpk + ALum |
+| [Glowing Tattoos](https://www.xivmodarchive.com/modid/74793) | ALum 框架 + Bibo+ 纹理 | [fail] skin.shpk + ALum |
+| [TBSE Specular Restored](https://www.xivmodarchive.com/modid/88778) | ALum3 + multi 纹理 + 发光纹身参数 | [fail] skin.shpk (HRO key) + ALum |
 
 **结论：没有发现任何社区 mod 将 body 的 skin.shpk 替换为 character.shpk。所有发光纹身都使用 ALum 框架或原版 EMISSIVE shader key。**
 
@@ -367,14 +367,14 @@ Row 9-15: Diff=[1,1,1] Spec=[1,1,1] Emis=[0,0,0]  (默认白色)
 ### 6.2 用户体验
 
 对于 body skin 贴花：
-- ✅ 每层有独立的位置/大小/旋转/颜色/透明度
-- ✅ 每层有独立的 emissive **形状**（通过 normal.a mask）
-- ❌ 所有层共享同一个 emissive **颜色**
-- ❌ 无法 per-layer 控制 roughness/metalness
+- [x] 每层有独立的位置/大小/旋转/颜色/透明度
+- [x] 每层有独立的 emissive **形状**（通过 normal.a mask）
+- [fail] 所有层共享同一个 emissive **颜色**
+- [fail] 无法 per-layer 控制 roughness/metalness
 
 对于 equipment/hair/iris 材质（已有 ColorTable）：
-- ✅ 完整 per-layer PBR（通过 ColorTable row pairs）
-- ✅ 完整 emissive 颜色独立
+- [x] 完整 per-layer PBR（通过 ColorTable row pairs）
+- [x] 完整 emissive 颜色独立
 
 ### 6.3 工作量
 
@@ -494,14 +494,14 @@ CRC          名称                              offset  size  默认值
 |---|---|---|
 | 0xD35B646A | **g_ConnectionVertex** | 顶点连接（身体接缝？） |
 | 0xE6E8672F | **g_ShapeDeformParam** | 体型变形参数 |
-| 0x2A4B3583 | **g_CustomizeParameter** | ⚠️ **皮肤染色！** 读取角色的 SkinColor/LipColor 等 |
+| 0x2A4B3583 | **g_CustomizeParameter** | [!] **皮肤染色！** 读取角色的 SkinColor/LipColor 等 |
 | 0x17FB799E | **g_WrinklessWeightRate** | 皱纹权重（面部细节） |
 
 **character.shpk 独有的 constants：**
 
 无额外 constant（character 的 18 个 constant 都是 skin 22 个的子集）。
 
-**⚠️ g_CustomizeParameter 是最关键的差异**：skin.shpk 通过这个 cbuffer 读取 `Human.CustomizeParameterCBuffer`（包含 SkinColor、LipColor、EyeColor 等角色定制数据）。character.shpk 没有这个 constant → **切换后角色皮肤颜色、嘴唇颜色全部丢失**。
+**[!] g_CustomizeParameter 是最关键的差异**：skin.shpk 通过这个 cbuffer 读取 `Human.CustomizeParameterCBuffer`（包含 SkinColor、LipColor、EyeColor 等角色定制数据）。character.shpk 没有这个 constant → **切换后角色皮肤颜色、嘴唇颜色全部丢失**。
 
 ### 7.5 Samplers —— 差异
 
@@ -759,9 +759,9 @@ output = finalColor * CommonParameter.scale;    // 最终缩放
 
 | 方案 | 可行性 | 说明 |
 |---|---|---|
-| 全局 emissive 颜色 + per-layer mask | ✅ 完全可行 | 现有架构直接支持 |
-| Per-layer 独立 emissive 颜色 | ❌ 不可能（原版 shader） | 需要修改 .shpk 或用 ALum |
-| 白色 emissive + 彩色 diffuse 模拟 | 🟡 部分可行 | g_EmissiveColor=[1,1,1]，在 diffuse 中烘焙颜色，视觉上接近但非真正彩色发光 |
+| 全局 emissive 颜色 + per-layer mask | [x] 完全可行 | 现有架构直接支持 |
+| Per-layer 独立 emissive 颜色 | [fail] 不可能（原版 shader） | 需要修改 .shpk 或用 ALum |
+| 白色 emissive + 彩色 diffuse 模拟 |  部分可行 | g_EmissiveColor=[1,1,1]，在 diffuse 中烘焙颜色，视觉上接近但非真正彩色发光 |
 
 **"白色 emissive + 彩色 diffuse" 方案解释：**
 - 设置 g_EmissiveColor = (1, 1, 1)（白色发光）
@@ -778,14 +778,14 @@ output = finalColor * CommonParameter.scale;    // 最终缩放
 
 | | Route C (skin->character) | 原版 EMISSIVE Key | ALum 兼容 | 简化 PBR |
 |---|---|---|---|---|
-| 开发成本 | 🔴 高 | 🟢 低 | 🟡 中 | 🟢 极低 |
-| 视觉质量 | 🔴 SSS 丢失 | ✅ 保持原版 | ✅ 保持原版 | ✅ 保持原版 |
-| Per-layer emissive 颜色 | ✅ 完全独立 | ❌ 全局颜色 | ❓ 取决于 ALum | ❌ 全局颜色 |
-| Per-layer emissive 形状 | ✅ ColorTable rows | ✅ Diffuse Alpha | ✅ Diffuse Alpha | ✅ Normal Alpha |
-| Per-layer PBR | ✅ 完整 | ❌ 无 | ❓ ALum3 部分支持 | ❌ 无 |
-| 与 HRO 体毛兼容 | 🟡 未知 | ❌ **互斥** | 🟡 取决于 ALum | ✅ 不影响 |
-| 社区先例 | ❌ **无人做过** | ✅ 少量使用 | ✅ **社区标准** | N/A |
-| 兼容性风险 | 🔴 高 | 🟡 中 | 🟡 依赖外部 mod | ✅ 无 |
+| 开发成本 |  高 |  低 |  中 |  极低 |
+| 视觉质量 |  SSS 丢失 | [x] 保持原版 | [x] 保持原版 | [x] 保持原版 |
+| Per-layer emissive 颜色 | [x] 完全独立 | [fail] 全局颜色 | ? 取决于 ALum | [fail] 全局颜色 |
+| Per-layer emissive 形状 | [x] ColorTable rows | [x] Diffuse Alpha | [x] Diffuse Alpha | [x] Normal Alpha |
+| Per-layer PBR | [x] 完整 | [fail] 无 | ? ALum3 部分支持 | [fail] 无 |
+| 与 HRO 体毛兼容 |  未知 | [fail] **互斥** |  取决于 ALum | [x] 不影响 |
+| 社区先例 | [fail] **无人做过** | [x] 少量使用 | [x] **社区标准** | N/A |
+| 兼容性风险 |  高 |  中 |  依赖外部 mod | [x] 无 |
 
 ### 推荐路径（更新后）
 

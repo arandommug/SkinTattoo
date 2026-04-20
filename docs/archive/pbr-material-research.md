@@ -147,12 +147,12 @@ Route A is a subset of Route C — even doing A first is necessary prerequisite 
 
 | # | Item | Status | Conclusion |
 |---|---|---|---|
-| 1 | Sampler/CBuffer list differences between the two shaders | 🔄 Deferred to v2 | **No IDA needed** — parse vanilla `.shpk` files directly with Penumbra's `ShpkFile.cs` to obtain sampler names / CBuffer field names / ShaderKey lists. A third candidate added: `charactertattoo.shpk` |
-| 2 | Load chain after ShaderPackageName rewrite | ✅ Confirmed | Shader packages go through ResourceManager's generic loader (`sub_140304A50`), same path as .tex/.mtrl; Penumbra redirection causes .mtrl to be re-parsed |
-| 3 | ColorTable physical size change compatibility | ⏸️ Reserved for v2 implementation verification | Requires in-game testing; MtrlFile.Write can already extend DataSet |
-| 4 | Meaning change of normal.a channel | ✅ Confirmed | Depends on ShaderPackage — vanilla skin.shpk's BuildSkin resets normal.a to 255; after switching to character.shpk the meaning automatically becomes row pair index |
-| 5 | Hook point for runtime shader package switch | ✅ Confirmed | **No hook needed** — OnRenderMaterial automatically fast-path dispatches by ShaderPackage pointer; as long as ShaderPackageName is correct in the .mtrl file, the engine automatically takes the right branch. This is the basis for the Route C effort reduction |
-| 6 | Vanilla row index occupancy scan | ✅ No IDA needed | Scan the vanilla normal.a histogram inside the compositor and avoid high-frequency values; already written into v1 spec |
+| 1 | Sampler/CBuffer list differences between the two shaders |  Deferred to v2 | **No IDA needed** — parse vanilla `.shpk` files directly with Penumbra's `ShpkFile.cs` to obtain sampler names / CBuffer field names / ShaderKey lists. A third candidate added: `charactertattoo.shpk` |
+| 2 | Load chain after ShaderPackageName rewrite | [x] Confirmed | Shader packages go through ResourceManager's generic loader (`sub_140304A50`), same path as .tex/.mtrl; Penumbra redirection causes .mtrl to be re-parsed |
+| 3 | ColorTable physical size change compatibility |  Reserved for v2 implementation verification | Requires in-game testing; MtrlFile.Write can already extend DataSet |
+| 4 | Meaning change of normal.a channel | [x] Confirmed | Depends on ShaderPackage — vanilla skin.shpk's BuildSkin resets normal.a to 255; after switching to character.shpk the meaning automatically becomes row pair index |
+| 5 | Hook point for runtime shader package switch | [x] Confirmed | **No hook needed** — OnRenderMaterial automatically fast-path dispatches by ShaderPackage pointer; as long as ShaderPackageName is correct in the .mtrl file, the engine automatically takes the right branch. This is the basis for the Route C effort reduction |
+| 6 | Vanilla row index occupancy scan | [x] No IDA needed | Scan the vanilla normal.a histogram inside the compositor and avoid high-frequency values; already written into v1 spec |
 
 Detailed IDA decompilation results (including specific addresses in ffxiv_dx11.exe, shader package string array, OnRenderMaterial function signature, MaterialResourceHandle field offsets) are in `docs/路线C-IDA调研补充.md`.
 

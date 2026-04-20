@@ -50,7 +50,7 @@ mul r1.xyz, cb0[3].xyzx, cb0[3].xyzx                   ; r1.xyz = g_EmissiveColo
 mul r1.xyz, r0.zzzz, r1.xyzx                           ; r1.xyz = g_EmissiveColor² × normal.alpha
 mul r0.x, r0.x, cb0[9].x                               ; r0.x × g_TileAlpha
 mul_sat r0.x, r0.x, v1.w                               ; r0.x = sat(normal.z × vertex.alpha)
-                                                       ;   ★ 注意：不像 Body 那样乘 normal.alpha
+                                                       ;   * 注意：不像 Body 那样乘 normal.alpha
 ```
 
 **关键差异**：Emissive 把 `normal.alpha` 存到 `r1.xyz`（emissive accumulator），主表面 `r0.x` 不再乘它。这就是 body 切到 Emissive 后失去光泽的直接原因。
@@ -208,10 +208,10 @@ C 的工程量其实很小（MtrlFileWriter 增加一个分支），但风险评
 
 ## 5.8 本章交付要点回顾
 
-- ✅ 接缝的物证链已从"假设"升级为"DXBC 级确定事实"
-- ✅ r1.xyz 的 emissive 通路全程可追踪（Ch5 §5.2）
-- ✅ 三条修复路径都有 DXBC 级别的操作清单
-- ✅ 未来 modding 方向（Ch6/Ch7）已开出
+- [x] 接缝的物证链已从"假设"升级为"DXBC 级确定事实"
+- [x] r1.xyz 的 emissive 通路全程可追踪（Ch5 §5.2）
+- [x] 三条修复路径都有 DXBC 级别的操作清单
+- [x] 未来 modding 方向（Ch6/Ch7）已开出
 
 ## 状态
 

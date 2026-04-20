@@ -52,10 +52,10 @@ PassIndices 映射：`[255,5,0,255,1,255,2,255,4,255,3,255,...]` —— SubViewI
 
 ### 4.2 验证（全链路 OK，但视觉无效）
 
-- HairShpkPatcher 报告 PS patched 32/32 ✓
-- mtrl 重写后 ShaderPackageName="hair_ct.shpk", g_EmissiveColor=(测试值) ✓
-- ShpkDiag 显示 hair mtrl 指向新 shpk 指针 ✓
-- **但游戏里龙角颜色完全没变化** ✗
+- HairShpkPatcher 报告 PS patched 32/32 (ok)
+- mtrl 重写后 ShaderPackageName="hair_ct.shpk", g_EmissiveColor=(测试值) (ok)
+- ShpkDiag 显示 hair mtrl 指向新 shpk 指针 (ok)
+- **但游戏里龙角颜色完全没变化** (no)
 
 ### 4.3 进一步诊断
 

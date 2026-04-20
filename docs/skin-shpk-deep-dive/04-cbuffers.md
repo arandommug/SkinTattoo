@@ -162,7 +162,7 @@ ieq r11.xy, cb6[r1.z + 0].xxxx, l(1, 3, 0, 0) // entry[0].x == 1/3？
 - Face PS 只从 t5 读 `normal.z`（`t5.zxyw` → r0.x），**根本不取 normal.w**。Face 用 `r5.w` (来自 t4 的 sample) 去查 skin ID，但不把 normal.alpha 作为 gloss 额外调制。
 - Emissive PS 虽然也读 `normal.zw`，但把 `r0.z` 挪到一条全新的计算链：`r1.xyz = cb0[3]² × r0.z`（cb0[3] 是 g_CameraParameter 里某个 3D 常量）。这条链出现在 ps_019_disasm.txt 的第 295~297 行附近，**Body 根本没有**。也就是说，Emissive 获取了 normal.alpha 却没有把它用于 Body 那条 gloss mask 链。
 
-### **☆ 这直接回答了用户今天的现场观察**
+### **o 这直接回答了用户今天的现场观察**
 
 > 「看游戏内效果应该就是发光乘法导致的，上面的皮肤是有光泽的，接缝下面的好像没有」
 
@@ -198,7 +198,7 @@ t1  g_SamplerLightSpecular  (0x6C19ACA4)  — 预计算的高光光照缓冲
 t2  g_SamplerGBuffer1       (0xE4E57422)  — GBuffer 第 1 张（通常是法线+粗糙度）
 t3  g_SamplerGBuffer2       (0x7DEC2598)  — GBuffer 第 2 张（albedo 等）
 t4  g_SamplerGBuffer        (0xEBBB29BD)  — 合并 GBuffer
-t5  g_SamplerNormal         (0x0C5EC1F1)  — ★ 法线贴图（本身）—— Face 取 .z，Body/Emissive 取 .zw
+t5  g_SamplerNormal         (0x0C5EC1F1)  — * 法线贴图（本身）—— Face 取 .z，Body/Emissive 取 .zw
 t6  g_SamplerMask           (0x8A4E82B6)  — 皮肤 mask 贴图
 t7  g_SamplerTileOrb        (0x800BE99B)  — tile/orb 贴图 (texture2darray)
 t8  g_SamplerReflectionArray(0xC5C4CB3C)  — 反射立方体数组 (texturecubearray)

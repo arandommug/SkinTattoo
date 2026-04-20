@@ -134,10 +134,10 @@ mod 中使用的纹理路径（所有预设共享）：
 
 | 特性 | skin.shpk (已支持) | iris.shpk (待支持) | 差异 |
 |---|---|---|---|
-| g_EmissiveColor | ✅ CRC 0x38A64362 | ✅ CRC 0x38A64362 | **完全相同** |
+| g_EmissiveColor | [x] CRC 0x38A64362 | [x] CRC 0x38A64362 | **完全相同** |
 | DataSetSize | 0 (无 ColorTable) | 0 (无 ColorTable) | 相同 |
-| CBuffer hook 可用 | ✅ | ✅ | 相同 |
-| LoadSourcePointer | ✅ | ✅ | 通用机制 |
+| CBuffer hook 可用 | [x] | [x] | 相同 |
+| LoadSourcePointer | [x] | [x] | 通用机制 |
 
 **EmissiveCBufferHook 的 CRC 查表机制是通用的**：
 1. 从 `MaterialResourceHandle` 获取 `ShaderPackageResourceHandle`
@@ -282,7 +282,7 @@ iris.shpk 是引擎原生支持的核心 shader 之一。
 ## 八、风险与注意事项
 
 1. **Emissive mask 依赖**：Dawntrail 后所有眼睛内置了 emissive 支持，只要 mask 红通道非零即可。大部分第三方眼睛 mod 已预设好。原版眼睛的 mask 红通道可能为 0，需测试。
-2. **双眼独立控制**：IRI A / IRI B 是独立材质，CBuffer g_EmissiveColor 可以独立设置 → **双眼可以不同颜色** ✅
+2. **双眼独立控制**：IRI A / IRI B 是独立材质，CBuffer g_EmissiveColor 可以独立设置 → **双眼可以不同颜色** [x]
 3. **与 Glamourer 兼容**：Glamourer 通过 CustomizeParameter 修改眼睛颜色（diffuse 层面），与 emissive CBuffer 修改不冲突
 4. **与 ALum 兼容**：ALum 使用 mask alpha 通道控制眼睛发光，SkinTattoo 使用 CBuffer g_EmissiveColor 控制，不同机制不冲突
 5. **Emissive 值范围**：建议 0.3-0.8，超过 0.9 可能出现视觉问题

@@ -199,7 +199,7 @@ public sealed class SkinMeshResolver
                     if (ExtractRoleSuffix(fileMatNames[i]) == targetRole)
                     {
                         matched.Add(i);
-                        res.Diagnostics.Add($"    matIdx {i} = {fileMatNames[i]} ✓ (role)");
+                        res.Diagnostics.Add($"    matIdx {i} = {fileMatNames[i]} (ok) (role)");
                     }
                 }
             }
@@ -210,7 +210,7 @@ public sealed class SkinMeshResolver
                     if (NormalizeSkinMtrlName(fileMatNames[i]) == targetNorm)
                     {
                         matched.Add(i);
-                        res.Diagnostics.Add($"    matIdx {i} = {fileMatNames[i]} ✓ (norm)");
+                        res.Diagnostics.Add($"    matIdx {i} = {fileMatNames[i]} (ok) (norm)");
                     }
                 }
             }

@@ -207,7 +207,7 @@ PS = PixelShaders[pass.PixelShader]
 | 每个 Shader 条目的 unk131 | 版本 ≥0x0D01 时跳 4 字节 | 同 | 一致 |
 | MaterialParamsDefaults | 未解析（只打印） | 完整读出 | 我们用不到默认值 |
 | SubViewKeys | 脚本目前没读（TODO 注释也没写） | 显式造出 id=1、id=2 两条 | 我们后续要解析 node 时必须补上 |
-| Nodes / Selectors | **没实现** | 完整实现 | ★ Ch2 要写的脚本就补这一块 |
+| Nodes / Selectors | **没实现** | 完整实现 | * Ch2 要写的脚本就补这一块 |
 
 结论：**当前 `parse_shpk.py` 足以打印资源、常量、keys，但还不能枚举 node**。Ch2 需要写一个增量脚本 `dump_nodes.py`，填上 Node/Pass 的解析，然后按 MaterialKey=SkinType 反向聚类。
 

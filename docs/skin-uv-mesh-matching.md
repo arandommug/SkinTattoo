@@ -31,17 +31,17 @@ To understand the root causes, we dumped the full resource tree and candidate re
 
 ### 2.1 `c1401b0001_top.mdl` Does Not Exist in SqPack
 
-In all 4 scenarios, every inferred "canonical body mdl candidate" is marked `[SqPack ✗]`:
+In all 4 scenarios, every inferred "canonical body mdl candidate" is marked `[SqPack (no)]`:
 
 ```
-chara/human/c1401/obj/body/b0001/model/c1401b0001_top.mdl  [SqPack ✗]
-chara/human/c1401/obj/body/b0001/model/c1401b0001.mdl      [SqPack ✗]
-chara/human/c1401/obj/body/b0001/model/c1401b0001_etc.mdl  [SqPack ✗]
+chara/human/c1401/obj/body/b0001/model/c1401b0001_top.mdl  [SqPack (no)]
+chara/human/c1401/obj/body/b0001/model/c1401b0001.mdl      [SqPack (no)]
+chara/human/c1401/obj/body/b0001/model/c1401b0001_etc.mdl  [SqPack (no)]
 ```
 
 Based on `IDataManager.FileExists`. **FFXIV does not have a "vanilla naked body mdl" at all** — the b0001 slot is merely a mtrl naming convention with no corresponding mdl file.
 
-> ⚠️ To confirm: do a direct Meddle SqPack probe as final verification (IDataManager is occasionally inaccurate).
+> [!] To confirm: do a direct Meddle SqPack probe as final verification (IDataManager is occasionally inaccurate).
 
 **Conclusion**: The original plan of "derive from tex path → load vanilla `c1401b0001_top.mdl`" is completely dead.
 
@@ -289,16 +289,16 @@ Input:
    - body / tail (target has no role suffix):
        Strict normalized name match (c\d{4} → c????, b\d{4} → b???? then compare)
        e.g.: target mt_c1401b0001_a.mtrl → mt_c????b????_a.mtrl
-             internal /mt_c0201b0001_a.mtrl → mt_c????b????_a.mtrl  ✓
+             internal /mt_c0201b0001_a.mtrl → mt_c????b????_a.mtrl  (ok)
 
    - face / hair (target has role suffix):
        Role-based match: extract the role suffix from the internal name, compare with
        the target's role suffix.
        e.g.: target mt_c1401f0001_fac_a.mtrl → role "fac"
-             internal /mt_c1401f0001_fac_a.mtrl → role "fac"  ✓
-             internal /mt_c1401f0001_fac_b.mtrl → role "fac"  ✓  (Au Ra horns)
-             internal /mt_c1401f0001_fac_c.mtrl → role "fac"  ✓
-             internal /mt_c1401f0001_iri_a.mtrl → role "iri"  ✗
+             internal /mt_c1401f0001_fac_a.mtrl → role "fac"  (ok)
+             internal /mt_c1401f0001_fac_b.mtrl → role "fac"  (ok)  (Au Ra horns)
+             internal /mt_c1401f0001_fac_c.mtrl → role "fac"  (ok)
+             internal /mt_c1401f0001_iri_a.mtrl → role "iri"  (no)
 
 5. Output List<MeshSlot>, each MeshSlot = (mdl_game_path, mdl_disk_path, matIdx[]).
 

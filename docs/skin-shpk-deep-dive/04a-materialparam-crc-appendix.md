@@ -21,7 +21,7 @@
 
 取证：
 - 实现在 `Meddle/Meddle/Meddle.Utils/Export/ShaderPackage.cs:97-178`
-- 验证命中：`g_EmissiveColor` → `0x38A64362` ✅、`g_DiffuseColor` → `0x2C2A34DD` ✅、`g_SamplerTable` → `0x2005679F` ✅、`g_NormalScale` → `0xB5545FBB` ✅
+- 验证命中：`g_EmissiveColor` → `0x38A64362` [x]、`g_DiffuseColor` → `0x2C2A34DD` [x]、`g_SamplerTable` → `0x2005679F` [x]、`g_NormalScale` → `0xB5545FBB` [x]
 - 注意这个 CRC **不同于** `CategorySkinType`（0x380CAED0）这类 shader key——shader key 用的可能是另一种哈希 / 约定或直接手填（Penumbra 代码里的 key `0x380CAED0` 与字符串 `CategorySkinType` 的 SE-CRC 哈希 `0x7B7F12CD` 对不上，说明不是同一族）。
 
 ## 4a.2 本附录命中的 17 个 CRC

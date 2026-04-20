@@ -8,12 +8,12 @@
 
 | Item | Status |
 |---|---|
-| Research (Glamourer data flow + ColorTable row selection mechanism) | ✅ Done (written to `PBR材质属性独立化调研.md`) |
-| Design clarification Q&A | 🔄 In progress (Q1–Q8 answered, ~1–2 questions remaining) |
-| Propose 2–3 candidate approaches | ⏸️ Pending |
-| Write formal spec → `docs/superpowers/specs/` | ⏸️ Pending |
-| User sign-off on spec | ⏸️ Pending |
-| Move to writing-plans for implementation plan | ⏸️ Pending |
+| Research (Glamourer data flow + ColorTable row selection mechanism) | [x] Done (written to `PBR材质属性独立化调研.md`) |
+| Design clarification Q&A |  In progress (Q1–Q8 answered, ~1–2 questions remaining) |
+| Propose 2–3 candidate approaches |  Pending |
+| Write formal spec → `docs/superpowers/specs/` |  Pending |
+| User sign-off on spec |  Pending |
+| Move to writing-plans for implementation plan |  Pending |
 
 ## Scope Breakdown
 
