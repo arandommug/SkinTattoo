@@ -7,3 +7,6 @@ packages/
 .superpowers/
 __pycache__/
 ShaderPatcher/reference/*.dxbc
+ShaderPatcher/extracted_ps/
+ShaderPatcher/skin_patched.shpk
+.local-test-repo/
