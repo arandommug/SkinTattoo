@@ -25,9 +25,9 @@
       "date": "2026-04-19",
       "en": [
         { "text": "Cross-project decal library: content-hash dedup, 96px thumbnail grid, right-click delete (idea from @Glorou via TextureOverlayer)", "links": [{ "label": "@Glorou", "url": "https://github.com/Glorou" }, { "label": "TextureOverlayer", "url": "https://github.com/Glorou/TextureOverlayer" }] },
-        { "text": "File picker auto-imports into the library — projects stay valid even when source PNGs are moved or renamed" },
+        { "text": "File picker auto-imports into the library -- projects stay valid even when source PNGs are moved or renamed" },
         { "text": "Normal map alpha can now drive emissive: auto-detected on import, preview and export share the same pipeline with GPU animation support" },
-        { "text": "Normal-only emissive no longer causes full-body flicker in preview — preview now routes through the patched skin shader like export does" },
+        { "text": "Normal-only emissive no longer causes full-body flicker in preview -- preview now routes through the patched skin shader like export does" },
         { "text": "Adding a decal to skin.shpk variants (skin_ct, etc.) no longer makes the material card vanish" },
         { "text": "DDS loader now handles BC7 / BC1-5 and DX10 extended headers" }
       ],
@@ -35,7 +35,7 @@
         { "text": "新增跨项目贴花素材库：内容哈希去重，96px 缩略图网格，右键删除 (思路来自 @Glorou 的 TextureOverlayer)", "links": [{ "label": "@Glorou", "url": "https://github.com/Glorou" }, { "label": "TextureOverlayer", "url": "https://github.com/Glorou/TextureOverlayer" }] },
         { "text": "选图对话框自动入库，源图被移动或改名后项目依然可用" },
         { "text": "Normal 贴图 alpha 可作为发光遮罩：导入时自动识别，预览与导出走同一管线且支持 GPU 动画" },
-        { "text": "Normal-only 发光在预览中不再导致全身闪烁 —— 预览与导出统一走 patched skin 着色器" },
+        { "text": "Normal-only 发光在预览中不再导致全身闪烁 ---- 预览与导出统一走 patched skin 着色器" },
         { "text": "对 skin.shpk 变体 (skin_ct 等) 添加贴花后，材质卡片不再消失" },
         { "text": "DDS 加载器支持 BC7 / BC1-5 与 DX10 扩展头" }
       ]
@@ -45,12 +45,12 @@
       "date": "2026-04-19",
       "en": [
         { "text": "Copy / paste decal group actions (thanks @endfish, #1)", "links": [{ "label": "@endfish", "url": "https://github.com/endfish" }, { "label": "#1", "url": "https://github.com/TheDeathDragon/SkinTattoo/pull/1" }] },
-        { "text": "Decal rotate (CCW/CW 90°) and mirror (X/Y) tools (thanks @endfish, #2)", "links": [{ "label": "@endfish", "url": "https://github.com/endfish" }, { "label": "#2", "url": "https://github.com/TheDeathDragon/SkinTattoo/pull/2" }] },
+        { "text": "Decal rotate (CCW/CW 90deg) and mirror (X/Y) tools (thanks @endfish, #2)", "links": [{ "label": "@endfish", "url": "https://github.com/endfish" }, { "label": "#2", "url": "https://github.com/TheDeathDragon/SkinTattoo/pull/2" }] },
         { "text": "Pasting decal groups across materials with different texture aspect ratios no longer stretches decals" }
       ],
       "zh": [
         { "text": "新增贴花组复制 / 粘贴 (感谢 @endfish, #1)", "links": [{ "label": "@endfish", "url": "https://github.com/endfish" }, { "label": "#1", "url": "https://github.com/TheDeathDragon/SkinTattoo/pull/1" }] },
-        { "text": "新增贴花旋转 (逆/顺 90°) 与镜像 (水平/垂直) 工具 (感谢 @endfish, #2)", "links": [{ "label": "@endfish", "url": "https://github.com/endfish" }, { "label": "#2", "url": "https://github.com/TheDeathDragon/SkinTattoo/pull/2" }] },
+        { "text": "新增贴花旋转 (逆/顺 90deg) 与镜像 (水平/垂直) 工具 (感谢 @endfish, #2)", "links": [{ "label": "@endfish", "url": "https://github.com/endfish" }, { "label": "#2", "url": "https://github.com/TheDeathDragon/SkinTattoo/pull/2" }] },
         { "text": "跨不同宽高比材质粘贴贴花组时不再拉伸" }
       ]
     },
@@ -59,7 +59,7 @@
       "date": "2026-04-18",
       "en": [
         { "text": "Normal target decals no longer leave trails when dragged" },
-        { "text": "UV wireframe shows the full mesh right after plugin reload — no need to reopen the 3D editor" },
+        { "text": "UV wireframe shows the full mesh right after plugin reload -- no need to reopen the 3D editor" },
         { "text": "Path diagnostics opens in a resizable standalone window" },
         { "text": "Added Full Redraw toolbar button to recover when previews get stuck" },
         { "text": "Support for body mods with non-standard texture names (Bibo+ etc.)" },

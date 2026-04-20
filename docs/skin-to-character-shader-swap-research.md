@@ -1,4 +1,4 @@
-# skin.shpk → character.shpk 替换可行性研究
+# skin.shpk -> character.shpk 替换可行性研究
 
 > 研究日期：2026-04-12 ~ 2026-04-13。
 > 基于前序文档 `route-c-ida-research.md`、`pbr-material-research.md`、`material-replacement-research.md`。
@@ -69,7 +69,7 @@
 | DataSetSize | 0 | 2048 (Dawntrail) | 2048 (推测) |
 | 行数 | N/A | 32 行 = 16 row pairs | 32 行 (推测) |
 | PBR 字段 | N/A | Diffuse/Specular/Emissive/Roughness/Metalness/Sheen per row | 同上 (推测) |
-| Row 选择机制 | N/A | `normal.a / 17` → row pair index 0-15 | 同上 (推测) |
+| Row 选择机制 | N/A | `normal.a / 17` -> row pair index 0-15 | 同上 (推测) |
 
 **这是整个 Route C 的核心价值**：获得 ColorTable 后，每个贴花层可以分配独立的 row pair，实现 per-layer PBR 独立。
 
@@ -87,10 +87,10 @@
 **转换需要补全至少 4 个 sampler**。skin mtrl 只引用 diffuse + normal 两个纹理；character mtrl 需要 mask + specular + index + ColorTable 纹理。
 
 解决方案：
-- mask → 生成全白/默认 mask 纹理
-- specular → 生成默认高光纹理或复用 normal 通道
-- index → normal.a 已有 row pair 索引信息，由 compositor 写入
-- ColorTable → 在 mtrl 中内嵌 2048 字节默认 ColorTable + 运行时 TextureSwapService 写入
+- mask -> 生成全白/默认 mask 纹理
+- specular -> 生成默认高光纹理或复用 normal 通道
+- index -> normal.a 已有 row pair 索引信息，由 compositor 写入
+- ColorTable -> 在 mtrl 中内嵌 2048 字节默认 ColorTable + 运行时 TextureSwapService 写入
 
 ### 2.3 CustomizeParameter（皮肤染色系统）
 
@@ -130,7 +130,7 @@ character.shpk 的 ShaderKey 系统完全不同（走 ColorTable 路线，不需
 
 skin.shpk 的核心视觉特性是 **次表面散射**：光线穿透皮肤产生半透明温暖质感。这是 shader 内部的像素着色逻辑，不是 CBuffer 参数能控制的。
 
-character.shpk 设计给金属/布料/皮革等装备材质，没有 SSS → 皮肤会显得像塑料/哑光涂料。
+character.shpk 设计给金属/布料/皮革等装备材质，没有 SSS -> 皮肤会显得像塑料/哑光涂料。
 
 ### 2.6 SlotSkinMaterials 系统
 
@@ -154,7 +154,7 @@ character.shpk 设计给金属/布料/皮革等装备材质，没有 SSS → 皮
 | 独占常量 | 2 个 unknown + g_ScatteringLevel | 无 | 无 |
 | 引擎内建 | [x] slot 1 | [x] 已收录在 57 shpk 列表 | [x] |
 | 社区使用案例 | 大量 | 极少/未知 | 中等 |
-| 视觉风险 | 高（皮肤→塑料） | **中（可能有皮肤特化？）** | 高 |
+| 视觉风险 | 高（皮肤->塑料） | **中（可能有皮肤特化？）** | 高 |
 
 **charactertattoo.shpk 是最值得测试的目标**：
 - 名字字面意思 "角色纹身"，暗示它可能是专门设计用于在身体上渲染贴花的 shader
@@ -220,8 +220,8 @@ character.shpk 设计给金属/布料/皮革等装备材质，没有 SSS → 皮
 > "As emissive is a shader key on the same level as hrothgar (body hair on skin) you cannot use both emissive and dyeable body hair on skin at the same time using vanilla shaders."
 
 - EMISSIVE 和 HRO（体毛）互斥
-- 男性 body mod（TBSE）默认使用 HRO key → 不能同时有体毛和发光
-- 女性 body mod（Bibo+, Gen3）默认使用 BODY key → 可以切换到 EMISSIVE
+- 男性 body mod（TBSE）默认使用 HRO key -> 不能同时有体毛和发光
+- 女性 body mod（Bibo+, Gen3）默认使用 BODY key -> 可以切换到 EMISSIVE
 
 ### 5.2 skin.shpk 完整纹理通道表（社区文档确认）
 
@@ -247,7 +247,7 @@ character.shpk 设计给金属/布料/皮革等装备材质，没有 SSS → 皮
 - ALum **替换 .shpk 文件本身**（修改版 shader），不仅仅是材质编辑
 - 皮肤发光信息放在 **Diffuse Alpha 通道**（全不透明=不发光，全透明=全强度发光）
 - 虹膜发光信息放在 **Mask Alpha 通道**
-- 原版 shader 忽略这些通道 → ALum 兼容纹理在没有 ALum 时安全降级
+- 原版 shader 忽略这些通道 -> ALum 兼容纹理在没有 ALum 时安全降级
 - ALum3 版本提供 "16 行可自定义的着色"（类似 colorset 系统）
 
 **对 SkinTattoo 的启示：**
@@ -263,7 +263,7 @@ character.shpk 设计给金属/布料/皮革等装备材质，没有 SSS → 皮
 |---|---|---|
 | ShaderPackage | skin.shpk | **skin.shpk**（未换shader!） |
 | DataSetSize | **0** (无 ColorTable) | **512** (有 ColorTable!) |
-| ColorTable 格式 | N/A | Legacy 16 rows × 32B/row |
+| ColorTable 格式 | N/A | Legacy 16 rows * 32B/row |
 | 纹理数 | 5 | 4 |
 | Tex 3 | transparent.tex | **blue.tex**（效果遮罩） |
 | Tex 4 | tbse_e.tex | (无) |
@@ -290,7 +290,7 @@ Row 9-15: Diff=[1,1,1] Spec=[1,1,1] Emis=[0,0,0]  (默认白色)
 
 4. **第四个纹理 `blue.tex` 是效果遮罩**。对应 mod 描述中 "a blue cutout of the tattoo instead of common/texture/blue.tex"。
 
-5. **Row 8 是纹身数据行**。Emis=[0.035, 0, 1] 说明纹身区域有蓝色发光。这正是 "16 行可自定义着色" 的实现——每行独立控制 Diffuse/Specular/Emissive。
+5. **Row 8 是纹身数据行**。Emis=[0.035, 0, 1] 说明纹身区域有蓝色发光。这正是 "16 行可自定义着色" 的实现----每行独立控制 Diffuse/Specular/Emissive。
 
 **结论：ALum3 通过修改 skin.shpk 本身，在保持 skin shader 的 SSS/皮肤渲染质量的同时，为 skin 材质添加了 ColorTable 支持。这是目前最理想的 "既保持皮肤质感又支持 per-area PBR" 的方案，但它是闭源的。**
 
@@ -323,7 +323,7 @@ Row 9-15: Diff=[1,1,1] Spec=[1,1,1] Emis=[0,0,0]  (默认白色)
 | 通道 | 用途 |
 |---|---|
 | Normal R/G | 切线空间法线 |
-| Normal Blue | **不透明度**（≠ skin.shpk 的皮肤颜色影响） |
+| Normal Blue | **不透明度**（!= skin.shpk 的皮肤颜色影响） |
 | Mask Red | 高光强度（更接近 metallic） |
 | Mask Green | 粗糙度 |
 | Mask Blue | 环境遮蔽 AO |
@@ -344,10 +344,10 @@ Row 9-15: Diff=[1,1,1] Spec=[1,1,1] Emis=[0,0,0]  (默认白色)
 ### 5.7 Shader ID 10: 金属/世界反射
 
 两个 shader 都支持 Shader ID 10：
-- **skin.shpk ID 10**: "Metallic/World Reflection" — 将 SSS/视差替换为金属感；blue 通道必须纯黑（非金属区域），中灰获得最佳光泽
+- **skin.shpk ID 10**: "Metallic/World Reflection" -- 将 SSS/视差替换为金属感；blue 通道必须纯黑（非金属区域），中灰获得最佳光泽
 - **character.shpk ID 10**: "Wet look/Specular change"
 
-> "Only recommended for power users" — 社区警告 skin.shpk ID 10 的使用需要极高的纹理精度
+> "Only recommended for power users" -- 社区警告 skin.shpk ID 10 的使用需要极高的纹理精度
 
 ---
 
@@ -378,7 +378,7 @@ Row 9-15: Diff=[1,1,1] Spec=[1,1,1] Emis=[0,0,0]  (默认白色)
 
 ### 6.3 工作量
 
-极小 — 只需删除 skin.shpk 材质在 UI 中的 PBR 滑条，保留 emissive 滑条。现有代码几乎不需要改动。
+极小 -- 只需删除 skin.shpk 材质在 UI 中的 PBR 滑条，保留 emissive 滑条。现有代码几乎不需要改动。
 
 ---
 
@@ -403,9 +403,9 @@ Row 9-15: Diff=[1,1,1] Spec=[1,1,1] Emis=[0,0,0]  (默认白色)
 | Scene Keys | 8 | 9 |
 | **Material Keys** | **3** | **4** |
 
-### 7.2 Material Params（CBuffer 常量）—— 完全相同
+### 7.2 Material Params（CBuffer 常量）---- 完全相同
 
-**skin.shpk 和 character.shpk 的 60 个 material params CRC、offset、size 完全一致。** 这证实了之前 Names.cs 分析的结论——两个 shader 共享同一套 CBuffer 布局。
+**skin.shpk 和 character.shpk 的 60 个 material params CRC、offset、size 完全一致。** 这证实了之前 Names.cs 分析的结论----两个 shader 共享同一套 CBuffer 布局。
 
 完整常量表（共 60 项，两个 shader 完全相同）：
 
@@ -473,9 +473,9 @@ CRC          名称                              offset  size  默认值
 0xE8C5CBFF   (unknown)                         308     4     [0.000]
 ```
 
-**g_EmissiveColor 在两个 shader 中 offset=48, size=12，完全一致** → EmissiveCBufferHook 的 CRC 查表机制对两个 shader 通用。
+**g_EmissiveColor 在两个 shader 中 offset=48, size=12，完全一致** -> EmissiveCBufferHook 的 CRC 查表机制对两个 shader 通用。
 
-### 7.3 Material Keys —— 核心差异
+### 7.3 Material Keys ---- 核心差异
 
 | skin.shpk (3 keys) | character.shpk (4 keys) |
 |---|---|
@@ -486,7 +486,7 @@ CRC          名称                              offset  size  默认值
 
 **CategorySkinType** 是 skin.shpk 独有的 material key，控制 Body/Face/HRO/Emissive 四种变体。character.shpk 用 **TextureMode** 和 **FlowMapMode** 替代。这两个 key 系统完全不兼容。
 
-### 7.4 Constants (CBuffer Descriptors) —— 重大差异
+### 7.4 Constants (CBuffer Descriptors) ---- 重大差异
 
 **skin.shpk 独有的 constants（22 个中 character.shpk 没有的）：**
 
@@ -501,9 +501,9 @@ CRC          名称                              offset  size  默认值
 
 无额外 constant（character 的 18 个 constant 都是 skin 22 个的子集）。
 
-**[!] g_CustomizeParameter 是最关键的差异**：skin.shpk 通过这个 cbuffer 读取 `Human.CustomizeParameterCBuffer`（包含 SkinColor、LipColor、EyeColor 等角色定制数据）。character.shpk 没有这个 constant → **切换后角色皮肤颜色、嘴唇颜色全部丢失**。
+**[!] g_CustomizeParameter 是最关键的差异**：skin.shpk 通过这个 cbuffer 读取 `Human.CustomizeParameterCBuffer`（包含 SkinColor、LipColor、EyeColor 等角色定制数据）。character.shpk 没有这个 constant -> **切换后角色皮肤颜色、嘴唇颜色全部丢失**。
 
-### 7.5 Samplers —— 差异
+### 7.5 Samplers ---- 差异
 
 **skin.shpk 独有的 samplers（13 个中）：**
 
@@ -524,7 +524,7 @@ CRC          名称                              offset  size  默认值
 **共享的 samplers：**
 g_SamplerNormal、g_SamplerDecal、g_SamplerTileOrb、g_SamplerGBuffer、g_SamplerReflectionArray、g_SamplerOcclusion、g_SkySampler、g_FogWeightLutSampler、g_SamplerDither、g_DissolveSampler、g_CompositeCommonSampler
 
-### 7.6 Textures —— 差异
+### 7.6 Textures ---- 差异
 
 **skin.shpk 独有的 textures：**
 
@@ -559,9 +559,9 @@ g_SamplerDiffuse、g_SamplerNormal、g_SamplerMask
 
 3. **g_CustomizeParameter 是无法逾越的鸿沟**：skin.shpk 依赖这个 cbuffer 读取角色皮肤颜色。character.shpk 没有这个 constant，且无法通过添加 material params 来模拟（因为 cbuffer 是 shader 内部硬编码绑定的）。
 
-4. **g_SamplerIndex + g_SamplerTable 是 ColorTable 的物理基础**：character.shpk 通过 Index 纹理选择 ColorTable 行，通过 Table 纹理提供 ColorTable 数据。skin.shpk 没有这两个 sampler → 原版 skin.shpk 无法读取 ColorTable。
+4. **g_SamplerIndex + g_SamplerTable 是 ColorTable 的物理基础**：character.shpk 通过 Index 纹理选择 ColorTable 行，通过 Table 纹理提供 ColorTable 数据。skin.shpk 没有这两个 sampler -> 原版 skin.shpk 无法读取 ColorTable。
 
-5. **ALum3 的方案被进一步证实**：ALum3 在 skin.shpk mtrl 中塞入了 ColorTable 数据（DataSetSize=512）。但原版 skin.shpk 没有 g_SamplerTable 采样器 → ALum 必须修改了 skin.shpk 本身来添加 ColorTable 读取能力。这与 "ALum 替换 .shpk 文件" 的社区描述吻合。
+5. **ALum3 的方案被进一步证实**：ALum3 在 skin.shpk mtrl 中塞入了 ColorTable 数据（DataSetSize=512）。但原版 skin.shpk 没有 g_SamplerTable 采样器 -> ALum 必须修改了 skin.shpk 本身来添加 ColorTable 读取能力。这与 "ALum 替换 .shpk 文件" 的社区描述吻合。
 
 ---
 
@@ -588,7 +588,7 @@ ALum 替换了 **7 个** shader 包，并附带 devkit JSON：
 
 DevKit JSON 完整定义了 ALum 的三级功能系统：
 
-**Shader Key `0x9D4A3204` — Atramentum Luminis Mode：**
+**Shader Key `0x9D4A3204` -- Atramentum Luminis Mode：**
 
 | 值 | 名称 | 说明 |
 |---|---|---|
@@ -596,24 +596,24 @@ DevKit JSON 完整定义了 ALum 的三级功能系统：
 | `0x1E8ABB16` | **Level 3** | 更多效果，需要额外纹理 |
 | `0xCD5C4FED` | **Level T** | 添加 **Color Table**，需要额外纹理 |
 
-**Level T 是关键** — 这就是 AetherFlux 纹身 mod 使用的模式，它在 skin.shpk 中启用了 ColorTable 支持。
+**Level T 是关键** -- 这就是 AetherFlux 纹身 mod 使用的模式，它在 skin.shpk 中启用了 ColorTable 支持。
 
 ### 8.3 纹理通道定义（随 ALum Mode 变化）
 
-**Normal Map (`0x0C5EC1F1`) — Alpha 通道随模式变化：**
+**Normal Map (`0x0C5EC1F1`) -- Alpha 通道随模式变化：**
 
 | Level 2/3 | Level T |
 |---|---|
-| Alpha: **Unused** | Alpha: **Color row index** ← ColorTable 行选择！ |
+| Alpha: **Unused** | Alpha: **Color row index** <- ColorTable 行选择！ |
 | Blue: Opacity (threshold) | Blue: Opacity (threshold) |
 
-**Diffuse Map (`0x115306BE`) — Alpha 通道随模式变化：**
+**Diffuse Map (`0x115306BE`) -- Alpha 通道随模式变化：**
 
 | Level 2/3 | Level T |
 |---|---|
 | Alpha: **Emissive conversion (inverted)** | Alpha: **Diffuse Brightness when Emissive on** |
 
-**Effect Map (`0xFF254304`, ALum 新增纹理) — 随模式变化：**
+**Effect Map (`0xFF254304`, ALum 新增纹理) -- 随模式变化：**
 
 | Level 2/3 | Level T |
 |---|---|
@@ -628,7 +628,7 @@ DevKit JSON 完整定义了 ALum 的三级功能系统：
 
 ### 8.4 ALum Emissive 控制常量
 
-**常量 `0x8F6498D1` — 随 ALum Mode 含义变化：**
+**常量 `0x8F6498D1` -- 随 ALum Mode 含义变化：**
 
 | Level 2/3 | Level T |
 |---|---|
@@ -641,35 +641,35 @@ AetherFlux 中的值 `[-5.0, 0.34]` = [暗环境 Strength, 亮环境 Strength]
 
 从 devkit JSON 确认了完整的工作流程：
 
-1. **Normal Alpha → Color row index**：Level T 模式下，法线贴图的 alpha 通道作为 ColorTable 行索引（与 character.shpk 的 Index 纹理类似功能，但复用了 normal alpha）
-2. **ColorTable 内嵌在 mtrl 中**：DataSetSize=512 = Legacy 16 行 × 32 bytes/行
+1. **Normal Alpha -> Color row index**：Level T 模式下，法线贴图的 alpha 通道作为 ColorTable 行索引（与 character.shpk 的 Index 纹理类似功能，但复用了 normal alpha）
+2. **ColorTable 内嵌在 mtrl 中**：DataSetSize=512 = Legacy 16 行 * 32 bytes/行
 3. **每行独立 Diffuse/Specular/Emissive**：从 AetherFlux 解析确认（Row 8 有彩色数据）
 4. **Emissive Brightness 在 Effect Map Blue 通道**：Level T 用 Effect 纹理的蓝通道控制每像素的发光强度
 5. **Emissive Map 提供发光颜色贴图**：独立的 RGB emissive 纹理（`0x2596EE18`）
 
 ### 8.6 ALum 其他功能
 
-**Iridescence（虹彩效果）— 常量 `0x4103FEEF`：**
+**Iridescence（虹彩效果）-- 常量 `0x4103FEEF`：**
 - 8 个参数：Effect Strength, Scale Detection, Normal Z Bias, Chroma, Hue Shift, Hue Multiplier
 - 通过 Effect Map Red 通道控制区域
 
 **Wetness（湿润效果）：** Effect Map Green 通道
 **Metallic（金属效果）：** Effect Map Blue 通道（Level 2/3 only）
-**Legacy Bloom — 常量 `0xA5EDBE5C`：** 模拟 ALum 2.x 的 bloom 效果
+**Legacy Bloom -- 常量 `0xA5EDBE5C`：** 模拟 ALum 2.x 的 bloom 效果
 
-**Hair Influence — 常量 `0xD367C386`：** Body 模式下的体毛启用开关（替代原版 HRO key）
-**Asymmetry Adapter — 常量 `0x5E3ABDFB`：** 对称/非对称模型+纹理适配
+**Hair Influence -- 常量 `0xD367C386`：** Body 模式下的体毛启用开关（替代原版 HRO key）
+**Asymmetry Adapter -- 常量 `0x5E3ABDFB`：** 对称/非对称模型+纹理适配
 
 ### 8.7 对 SkinTattoo 的重大启示
 
 1. **ALum Level T 证明了 "skin.shpk + ColorTable" 路线是可行的**，且不会丢失 SSS/皮肤颜色（因为 ALum 仍然基于 skin shader 的渲染管线）
 
-2. **Normal Alpha 作为 Color row index** 是 ALum 的关键创新 — 原版 skin.shpk 中 normal alpha 是 tilemap mask，ALum 在 Level T 模式下将其重新定义为 ColorTable 行选择器
+2. **Normal Alpha 作为 Color row index** 是 ALum 的关键创新 -- 原版 skin.shpk 中 normal alpha 是 tilemap mask，ALum 在 Level T 模式下将其重新定义为 ColorTable 行选择器
 
 3. **ALum 使用旧版 shader 格式 (0x0B01)**，这意味着它不是在原版 0x0D01 基础上修改的，而是从更早的 shader 版本分叉开发的。这可能导致与未来游戏更新的兼容性问题。
 
 4. **SkinTattoo 的可选路径：**
-   - **依赖 ALum**：检测 ALum Level T 是否激活 → 直接利用 ColorTable + normal.a row index → per-layer 独立 PBR
+   - **依赖 ALum**：检测 ALum Level T 是否激活 -> 直接利用 ColorTable + normal.a row index -> per-layer 独立 PBR
    - **自制 skin.shpk**：参考 ALum 的 devkit 设计，自己修改 skin.shpk 添加 ColorTable 支持。ALum 的 devkit JSON 几乎就是完整的设计规格书。
    - **ALum 兼容模式**：SkinTattoo 不修改 shader，但生成的 mtrl/纹理兼容 ALum 格式。如果用户装了 ALum 就有 per-layer PBR，没装就 fallback 到全局 emissive。
 
@@ -694,14 +694,14 @@ Texture Bindings:
   t2 = g_SamplerGBuffer1         (GBuffer 1)
   t3 = g_SamplerGBuffer2         (GBuffer 2)
   t4 = g_SamplerGBuffer.T        (GBuffer 主)
-  t5 = g_SamplerNormal.T         ← 法线贴图 (emissive mask 来源!)
+  t5 = g_SamplerNormal.T         <- 法线贴图 (emissive mask 来源!)
   t6 = g_SamplerMask.T           (遮罩贴图)
   t7 = g_SamplerTileOrb.T        (Tile 贴图数组)
   t8 = g_SamplerReflectionArray  (环境反射)
   t9 = g_SamplerOcclusion.T      (遮蔽贴图)
 
 CBuffer Bindings:
-  cb0 = g_MaterialParameter      ← 包含 g_EmissiveColor
+  cb0 = g_MaterialParameter      <- 包含 g_EmissiveColor
   cb1 = g_CommonParameter
   cb2 = g_PbrParameterCommon
   cb3 = g_CameraParameter
@@ -719,7 +719,7 @@ float2 normalSample = SampleBias(g_SamplerNormal, uv, mipBias).wz;
 float emissiveMask = normalSample.y;  // = Normal.alpha (t5.w)
 
 // Line 268-269: 计算 emissive 颜色
-float3 emissiveColor = g_EmissiveColor.rgb * g_EmissiveColor.rgb;  // 自乘 (gamma² → linear)
+float3 emissiveColor = g_EmissiveColor.rgb * g_EmissiveColor.rgb;  // 自乘 (gamma^2 -> linear)
 float3 emissive = emissiveMask * emissiveColor;
 
 // Line 725: 乘以动态材质参数
@@ -732,18 +732,18 @@ finalColor += emissiveContrib;
 
 // Line 744-747: 后处理输出
 finalColor *= InstanceParameter.MulColor.rgb;  // 实例颜色
-finalColor = sqrt(max(finalColor, 0));          // linear → gamma
+finalColor = sqrt(max(finalColor, 0));          // linear -> gamma
 output = finalColor * CommonParameter.scale;    // 最终缩放
 ```
 
 ### 9.4 核心结论
 
 **Emissive Mask = Normal Map Alpha (t5.w)**
-- 这与 SkinTattoo 现有实现一致 — 已经将 emissive mask 写入 normal.a composite
+- 这与 SkinTattoo 现有实现一致 -- 已经将 emissive mask 写入 normal.a composite
 - 社区文档说 "Diffuse Alpha = emissive mask" 可能是指 ALum 的行为，不是原版 shader
 
-**Emissive Color = g_EmissiveColor.rgb² (per-material)**
-- CBuffer 常量，经过自乘转换（gamma→linear）
+**Emissive Color = g_EmissiveColor.rgb^2 (per-material)**
+- CBuffer 常量，经过自乘转换（gamma->linear）
 - 对整个材质统一，**不存在 per-pixel 颜色变化**
 - 没有任何纹理 RGB 参与 emissive 颜色计算
 
@@ -791,7 +791,7 @@ output = finalColor * CommonParameter.scale;    // 最终缩放
 
 **短期**（当前版本）：
 
-→ **简化 skin.shpk 的 PBR UI，保留全局 emissive。**
+-> **简化 skin.shpk 的 PBR UI，保留全局 emissive。**
 
 - 删除 skin.shpk 材质上的 per-layer Roughness/Metalness/Specular/Sheen
 - 保留全局 emissive 颜色 + per-layer emissive mask（现有 normal.a composite）
@@ -805,7 +805,7 @@ output = finalColor * CommonParameter.scale;    // 最终缩放
 
 **中期**（增强 skin.shpk emissive 能力）：
 
-→ **利用原版 EMISSIVE shader key + Diffuse Alpha 作为 emissive mask**
+-> **利用原版 EMISSIVE shader key + Diffuse Alpha 作为 emissive mask**
 
 - 将 emissive mask 从 normal.a 迁移到 **diffuse alpha**（与社区标准一致）
 - 利用 Diffuse Alpha 的 per-pixel 精度实现更精细的发光图案
@@ -814,16 +814,16 @@ output = finalColor * CommonParameter.scale;    // 最终缩放
 
 **长期探索**（如果确实需要 per-layer 独立 emissive 颜色）：
 
-→ **研究 ALum3 的 16 行 colorset 实现机制**
+-> **研究 ALum3 的 16 行 colorset 实现机制**
 
 - ALum3 在 skin.shpk 框架下实现了 "16 rows of completely customizable coloring"
 - 暗示 ALum 修改了 skin.shpk 本身来支持 colorset-like 行为
 - 如果能理解 ALum 技术方案，SkinTattoo 可以实现类似功能
 - ALum 是闭源的，需要逆向分析其修改的 .shpk 文件
 
-→ **Route C 降为最低优先级**
+-> **Route C 降为最低优先级**
 
-- 社区零先例 + 纹理通道语义完全不同 + SSS 丢失 → 风险过高
+- 社区零先例 + 纹理通道语义完全不同 + SSS 丢失 -> 风险过高
 
 ---
 
@@ -844,10 +844,10 @@ output = finalColor * CommonParameter.scale;    // 最终缩放
 
 ### 11.2 工具与脚本
 
-- `_shpk_analysis/parse_shpk.py` — Python .shpk 解析器（基于 Penumbra ShpkFile.cs 格式）
-- `_shpk_analysis/extract_shpk.py` — SqPack 提取工具（未完成，CRC 匹配问题）
-- `_shpk_analysis/aetherflux/` — AetherFlux (ALum3) pmp 解压
-- `_shpk_analysis/tbse/` — TBSE Specular Restored pmp 解压
+- `_shpk_analysis/parse_shpk.py` -- Python .shpk 解析器（基于 Penumbra ShpkFile.cs 格式）
+- `_shpk_analysis/extract_shpk.py` -- SqPack 提取工具（未完成，CRC 匹配问题）
+- `_shpk_analysis/aetherflux/` -- AetherFlux (ALum3) pmp 解压
+- `_shpk_analysis/tbse/` -- TBSE Specular Restored pmp 解压
 
 ### 11.3 实验验证清单（如仍要推进 Route C）
 

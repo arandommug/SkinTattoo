@@ -48,7 +48,7 @@ public class SavedLayer
     public int Kind { get; set; } = 0;
 
     // Which output texture the layer paints into. 0=Diffuse, 1=Mask, 2=Normal.
-    // Missing in older saves → deserializes to 0 (Diffuse), preserving legacy behavior.
+    // Missing in older saves -> deserializes to 0 (Diffuse), preserving legacy behavior.
     public int TargetMap { get; set; } = 0;
 
     public bool AffectsSpecular { get; set; }

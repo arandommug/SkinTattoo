@@ -18,7 +18,7 @@ namespace SkinTattoo.Gui;
 
 public partial class MainWindow
 {
-    // ── Card data for deduplicated material display ──────────────────────────
+    // -- Card data for deduplicated material display --------------------------
 
     private sealed class MtrlCardInfo
     {
@@ -45,7 +45,7 @@ public partial class MainWindow
         public ResourceNodeDto? FirstParentMdl;
     }
 
-    // ── Resource Browser Window ──────────────────────────────────────────────
+    // -- Resource Browser Window ----------------------------------------------
 
     private void DrawResourceWindow()
     {
@@ -111,7 +111,7 @@ public partial class MainWindow
 
         ImGui.End();
 
-        // Independent diagnostics window — drawn outside the resource browser's
+        // Independent diagnostics window -- drawn outside the resource browser's
         // Begin/End so it's a separate OS-level window the user can drag/resize.
         DrawPathDiagWindow(cards);
     }
@@ -155,7 +155,7 @@ public partial class MainWindow
         draw.AddText(subPos, ImGui.GetColorU32(new Vector4(0.75f, 0.75f, 0.8f, 1f)), sub);
     }
 
-    // ── Card building ────────────────────────────────────────────────────────
+    // -- Card building --------------------------------------------------------
 
     private List<MtrlCardInfo> BuildMtrlCards()
     {
@@ -179,7 +179,7 @@ public partial class MainWindow
     /// A card is a ghost when the resolver can only reach its mtrl via the
     /// SqPack-vanilla fallback (all MeshSlots have DiskPath=null). That means
     /// the user's currently-loaded mods don't actually have a disk mdl whose
-    /// material slots reference this mtrl — picking the card produces a mesh
+    /// material slots reference this mtrl -- picking the card produces a mesh
     /// (loaded from vanilla SqPack) whose UV layout doesn't match the
     /// mod-replaced texture, and the 3D preview comes out black/garbled.
     /// Body/face/hair/tail only; iris and other slots bypass this check.
@@ -308,7 +308,7 @@ public partial class MainWindow
             ScanForCards(child, mdl, cards);
     }
 
-    // ── Card rendering ───────────────────────────────────────────────────────
+    // -- Card rendering -------------------------------------------------------
 
     private void DrawMtrlCard(MtrlCardInfo card)
     {
@@ -346,7 +346,7 @@ public partial class MainWindow
             ImGui.SameLine();
             ImGui.TextDisabled(Strings.T("diag.merged_mtrl", card.MtrlPaths.Count));
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip(string.Join("\n", card.MtrlPaths.Select(p => "• " + Path.GetFileName(p))));
+                ImGui.SetTooltip(string.Join("\n", card.MtrlPaths.Select(p => "* " + Path.GetFileName(p))));
         }
 
         // Diagnostics window: copy tex / mtrl / live mdl / derived candidate mdl
@@ -756,7 +756,7 @@ public partial class MainWindow
         ImGui.EndGroup();
     }
 
-    // ── Selection logic ──────────────────────────────────────────────────────
+    // -- Selection logic ------------------------------------------------------
 
     // Deferred state for an add-target operation that's waiting on a Penumbra
     // redraw to finish. RedrawPlayer clears the resource tree while the character
@@ -922,7 +922,7 @@ public partial class MainWindow
 
             if (mdlPaths.Count > 0)
             {
-                // Don't set MeshGamePath — LoadMeshForGroup checks it before
+                // Don't set MeshGamePath -- LoadMeshForGroup checks it before
                 // AllMeshPaths and would load only a single model.
                 tg.MeshDiskPath = mdlPaths[0];
                 for (int i = 1; i < mdlPaths.Count; i++)
@@ -936,12 +936,12 @@ public partial class MainWindow
         config.Save();
     }
 
-    // ── Group mesh reload (resolver-aware, with legacy fallback) ─────────────
+    // -- Group mesh reload (resolver-aware, with legacy fallback) -------------
 
     private void ReloadGroupMesh(TargetGroup group)
         => previewService.LoadMeshForGroup(group);
 
-    // ── Resource tree helpers ────────────────────────────────────────────────
+    // -- Resource tree helpers ------------------------------------------------
 
     private void RefreshResources()
     {

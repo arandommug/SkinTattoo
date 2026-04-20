@@ -18,7 +18,7 @@ public class RowPairAllocator
 
     /// <summary>
     /// Scan vanilla index map R channel: row pair = round(R / 17).
-    /// Marks row pairs covering ≥0.5% of pixels as occupied. Idempotent.
+    /// Marks row pairs covering >=0.5% of pixels as occupied. Idempotent.
     /// </summary>
     public void ScanVanillaOccupation(byte[] vanillaIndexRgba, int width, int height)
     {

@@ -2,19 +2,19 @@
 inject Body's gloss mask multiplication so switching a body mtrl into Emissive
 does not lose the `normal.alpha * vertex.alpha` gloss contribution.
 
-See docs/skin-shpk-deep-dive/05-seam-and-fix-paths.md §5.3 Path A.
+See docs/skin-shpk-deep-dive/05-seam-and-fix-paths.md Sec.5.3 Path A.
 
 Pattern (robust to register-allocator variations across 32 sibling PSes):
 
-    # "Emissive init" — two consecutive MUL instructions:
-    mul  rX.xyz, cb0[3].xyzx, cb0[3].xyzx        # emissive²  (always 9 tokens)
+    # "Emissive init" -- two consecutive MUL instructions:
+    mul  rX.xyz, cb0[3].xyzx, cb0[3].xyzx        # emissive^2  (always 9 tokens)
     mul  rX.xyz, rS.<swiz>, rX.xyzx              # rX *= rS.? (rS holds normal.alpha)
                                                  # swizzle is zzzz or wwww depending on PS
 
     # Later (may be several instructions away due to SceneKey diffs):
     mul  rC.?, ?, cb0[9].x                        # rC.? *= g_TileAlpha
-    mul[_sat] rC.?, rC.?, v1.w                    # rC.? = [sat](rC.? × vertex.alpha)
-                                                  # ← THIS is where we insert before
+    mul[_sat] rC.?, rC.?, v1.w                    # rC.? = [sat](rC.? * vertex.alpha)
+                                                  # <- THIS is where we insert before
 
 We insert:
     mul rC.?, rC.?, rS.?       # restore body's normal.alpha gloss contribution
@@ -26,7 +26,7 @@ import sys
 from dxbc_patch_colortable import rebuild_dxbc, d3d_disassemble, d3d_validate
 
 
-# ── DXBC operand token encoding helpers ──
+# -- DXBC operand token encoding helpers --
 
 def operand_temp_mask(comp_mask: int) -> int:
     """Encode dest-style operand: TEMP reg with write-mask.
@@ -66,7 +66,7 @@ def build_mul_single(dest_reg: int, dest_comp: int,
     return struct.pack('<7I', *tokens)
 
 
-# ── SHEX scanning ──
+# -- SHEX scanning --
 
 def iter_shex_instructions(shex_data: bytes):
     """Yield (pos, opcode_token, length_bytes) for each instruction."""
@@ -100,7 +100,7 @@ def decode_operand_src_swizzle(shex_data: bytes, pos: int):
     if (tok >> 31) & 1:
         return None
     consumed = 4
-    # index dims — for TEMP/INPUT typically 1D
+    # index dims -- for TEMP/INPUT typically 1D
     if idx_dim == 1:
         reg = struct.unpack_from('<I', shex_data, pos + consumed)[0]
         consumed += 4
@@ -128,7 +128,7 @@ def decode_operand_src_swizzle(shex_data: bytes, pos: int):
     return (op_type, reg, comps, extra_idx, consumed)
 
 
-# ── Pattern recognition ──
+# -- Pattern recognition --
 
 def find_emissive_init_pair(shex_data: bytes):
     """Locate the `mul rX.xyz, cb0[3], cb0[3]` + `mul rX.xyz, rS.<swiz>, rX.xyzx` pair.
@@ -151,7 +151,7 @@ def find_emissive_init_pair(shex_data: bytes):
             continue
         if shex_data[pos + 12:pos + 12 + 24] != cb3_tail:
             continue
-        # Match — this is `mul rX.xyz, cb0[3], cb0[3]`
+        # Match -- this is `mul rX.xyz, cb0[3], cb0[3]`
         # Now parse the IMMEDIATELY following instruction
         next_pos = pos + blen
         if next_pos >= len(shex_data):
@@ -170,7 +170,7 @@ def find_emissive_init_pair(shex_data: bytes):
         op_type, reg, comps, _, _ = src0
         if op_type != 0:  # must be TEMP
             continue
-        # The swizzle is typically .zzzz or .wwww — component is comps[0]
+        # The swizzle is typically .zzzz or .wwww -- component is comps[0]
         return (next_pos, reg, comps[0])
     return None
 
@@ -224,7 +224,7 @@ def find_vertex_alpha_mul(shex_data: bytes, start_pos: int):
     return None
 
 
-# ── Patch function ──
+# -- Patch function --
 
 def patch_shex_insert_gloss_mask(shex_data: bytearray) -> bytearray:
     """Insert gloss-mask mul just before the `mul[_sat] rC.?, rC.?, v1.w` instruction."""
@@ -289,7 +289,7 @@ def patch_dxbc_gloss_mask(dxbc_bytes: bytes) -> bytes:
     return result
 
 
-# ── CLI ──
+# -- CLI --
 
 def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))

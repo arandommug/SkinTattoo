@@ -29,12 +29,12 @@ cbuffer g_PbrParameterCommon
 ### 1.2 现有 `g_MaterialParameter` 可扩展
 当前 `skin_patched.shpk` 的 PS[19] 只用到 `cb0[0..17]`（`float4 g_MaterialParameter[20]`），`cb0[18]` / `cb0[19]` 空闲。扩展数组长度并在 RDEF + SHEX 同步声明即可新增材质参数。
 
-### 1.3 动画公式 → DXBC 指令映射
+### 1.3 动画公式 -> DXBC 指令映射
 | 模式 | 数学表达式 | DXBC 指令数（估算） |
 |---|---|---|
-| Pulse | `k = 1 + amp * sin(2π · speed · t)` | 3（mul/sincos/mad） |
-| Ripple | `k = 1 + amp * sin(freq · ‖uv − c‖ − 2π · speed · t)` | ~8（add/dp2/sqrt/mad/sincos） |
-| Flicker | `k = 1 + amp * (hash(floor(speed·t)) − 0.5)` | ~5（floor/mul/frac 哈希） |
+| Pulse | `k = 1 + amp * sin(2pi . speed . t)` | 3（mul/sincos/mad） |
+| Ripple | `k = 1 + amp * sin(freq . ||uv - c|| - 2pi . speed . t)` | ~8（add/dp2/sqrt/mad/sincos） |
+| Flicker | `k = 1 + amp * (hash(floor(speed.t)) - 0.5)` | ~5（floor/mul/frac 哈希） |
 
 调制方式：在 PS 末尾 `mul o0.xyz, r0.xyz, cb1[3].xxxx`（line 750）之前，对累积 emissive 的寄存器 `r0.xyz` 做一次乘法 `mul r0.xyz, r0.xyz, k`。
 
@@ -87,12 +87,12 @@ cbuffer g_PbrParameterCommon
    - `Gui/MainWindow.ParameterPanel.cs`：发光区块下加 Combo + 2 sliders
    - `Localization/*.json`：`anim_mode/speed/amplitude`、`anim.none/pulse`
 
-4. **实时响应**：UI 拖动滑块不触发全量重绘——走现有 `RestoreSkinCtAfterHighlight` 路径，重建 ColorTable 纹理并做 GPU atomic swap；shader 每帧读新 CT，无缝过渡。
+4. **实时响应**：UI 拖动滑块不触发全量重绘----走现有 `RestoreSkinCtAfterHighlight` 路径，重建 ColorTable 纹理并做 GPU atomic swap；shader 每帧读新 CT，无缝过渡。
 
 **架构决策记录**：
 - 最初尝试：用 cb0[19].zw 存 speed/amp（shpk 级 material param `g_DecalAnimParam0`）+ EmissiveCBufferHook 实时写 CBuffer
-- 问题：skin.shpk 单材质共享一组 cb0 → 同材质多层共用动画参数，**无法独立**
-- 最终方案：把 speed/amp 塞进 ColorTable row（每层独一的 rowPair），着色器二次 sample 读取——天然每层独立，且复用已有的 ColorTable atomic swap 机制
+- 问题：skin.shpk 单材质共享一组 cb0 -> 同材质多层共用动画参数，**无法独立**
+- 最终方案：把 speed/amp 塞进 ColorTable row（每层独一的 rowPair），着色器二次 sample 读取----天然每层独立，且复用已有的 ColorTable atomic swap 机制
 
 **已知限制**：
 - **眼睛（iris.shpk）不支持**：iris 材质走独立的 iris.shpk 且走 CBuffer 发光路径（g_EmissiveColor + g_IrisRingEmissiveIntensity），本阶段未 patch iris.shpk，眼睛无 pulse 动画。未来若需：需为 iris.shpk 做类似 DXBC 注入 + ColorTable 化改造。
@@ -101,8 +101,8 @@ cbuffer g_PbrParameterCommon
 **目标**：方波闪烁，类似坏灯泡／电光效果。
 
 实现：
-- 公式简化为 `k = 1 + amp * sign(sin(2π·speed·t))` — 二值方波，duty 50%
-- DXBC 在 sincos 后插入 4 条指令：`ge → movc → ge → movc`，把 sin 值条件替换为 `±1`
+- 公式简化为 `k = 1 + amp * sign(sin(2pi.speed.t))` -- 二值方波，duty 50%
+- DXBC 在 sincos 后插入 4 条指令：`ge -> movc -> ge -> movc`，把 sin 值条件替换为 `+/-1`
 - CT col 3 half 14 = mode（0=Pulse, 1=Flicker）；根据 mode >= 0.5 做 `movc` 选择 wave
 - payload 从 62 token 扩到 94 token
 - iris.shpk 路径复用 `EmissiveCBufferHook.ComputeModulatedColor`：`s >= 0 ? +1 : -1`
@@ -112,12 +112,12 @@ cbuffer g_PbrParameterCommon
 **目标**：两个颜色之间按 sin 周期性 lerp，实现双色呼吸。
 
 实现：
-- 公式 `final = lerp(colorA, colorB, 0.5 + 0.5*amp*sin(2π·speed·t))`
+- 公式 `final = lerp(colorA, colorB, 0.5 + 0.5*amp*sin(2pi.speed.t))`
 - amp 控制插值幅度：amp=1 两色完全来回；amp=0 保持 colorA
 - DXBC 扩展：
   - sincos 后新增 `mov r7.w, r9.x` 备份 sin（给 Gradient 用，pulse/flicker 会 clobber r9.x）
   - pulse/flicker 乘法前 `mov r7.xyz, r1.xyzx` 备份 colorA
-  - 乘法后新加 9 条指令：采样 col 4 到 r3 → 计算 mix → lerp → 3-component movc 选最终结果
+  - 乘法后新加 9 条指令：采样 col 4 到 r3 -> 计算 mix -> lerp -> 3-component movc 选最终结果
   - payload 从 94 token 扩到 171 token
 - CT col 3 half 14 = mode (0=Pulse, 1=Flicker, 2=Gradient)
 - CT col 4 halfs 17/18/19 = colorB RGB（half 16 保留给 vanilla roughness 不动）
@@ -129,10 +129,10 @@ cbuffer g_PbrParameterCommon
 **目标**：从贴花中心向外扩散的同心圆发光波纹。
 
 实现：
-- 公式 `phase = 2π·speed·t - freq·dist`，`k = 1 + amp·sin(phase)`，最终 `r1 *= k`
+- 公式 `phase = 2pi.speed.t - freq.dist`，`k = 1 + amp.sin(phase)`，最终 `r1 *= k`
 - `dist = length(v2.xy - center)`，`v2.xy` = TEXCOORD0（vanilla PS[19] 保留的 body UV0）
-- ColorTable col 5 halfs 20/21/22 = `centerU`、`centerV`、`freq`；非 Ripple 模式写 0 → 空间相位偏移为 0 → 路径无条件执行但等效 Pulse，避免 shader 分支
-- DXBC 新增 7 条指令（`mov col5 U` + `sample col5` + `add d = uv - center` + `dp2` + `sqrt` + `mul freq·dist` + `add phase -= ripple`），payload 从 169 → 220 token
+- ColorTable col 5 halfs 20/21/22 = `centerU`、`centerV`、`freq`；非 Ripple 模式写 0 -> 空间相位偏移为 0 -> 路径无条件执行但等效 Pulse，避免 shader 分支
+- DXBC 新增 7 条指令（`mov col5 U` + `sample col5` + `add d = uv - center` + `dp2` + `sqrt` + `mul freq.dist` + `add phase -= ripple`），payload 从 169 -> 220 token
 - Center 直接取 `DecalLayer.UvCenter`（贴花自己的 UV 中心），freq 新增字段 `AnimFreq`（默认 20 rings/UV）
 - iris.shpk 路径 `EmissiveCBufferHook.ComputeModulatedColor` 没法获取逐像素 UV，Ripple 模式优雅降级为 Pulse
 - shpk 缓存 `skin_ct_v5.shpk`
@@ -140,12 +140,12 @@ cbuffer g_PbrParameterCommon
 ### 阶段 4：Iris（眼部）pulse 支持（已完成 2026-04-17，路线 4B）
 **目标**：让眼睛也能按相同参数 pulse。
 
-选中 **4B（CBuffer 实时调制）**——iris 组通常只有一层贴花，不需要 per-layer 独立。
+选中 **4B（CBuffer 实时调制）**----iris 组通常只有一层贴花，不需要 per-layer 独立。
 
 实现：
 1. `Interop/EmissiveCBufferHook.cs`：
    - `targets` 的 value 从 `Vector3` 扩展为 `TargetData { BaseColor, AnimMode, AnimSpeed, AnimAmplitude }`
-   - 新增 `Stopwatch clock`，Detour 每帧计算 `k = max(0, 1 + amp·sin(2π·speed·t))`，`modulatedColor = baseColor·k`
+   - 新增 `Stopwatch clock`，Detour 每帧计算 `k = max(0, 1 + amp.sin(2pi.speed.t))`，`modulatedColor = baseColor.k`
    - `SetTargetByPath` / `SetIrisEmissive` 新增可选参数 `animMode/speed/amplitude`（默认 None/0/0，向后兼容）
 2. `Services/PreviewService.cs`：
    - `EmissiveEntry` record 增加三个动画字段
@@ -154,7 +154,7 @@ cbuffer g_PbrParameterCommon
 3. 时钟源：每个 hook 实例一个 Stopwatch（wall-clock seconds），无需读 `cb2[0].x`。数值不与 shader DXBC pulse 完全同步，但视觉频率一致。
 
 **行为约束**：
-- iris 路径与 skin CT 路径隔离：iris 走 EmissiveEntry → CBuffer hook；skin 走 CT entry → DXBC pulse。两条路径不会互相干扰
+- iris 路径与 skin CT 路径隔离：iris 走 EmissiveEntry -> CBuffer hook；skin 走 CT entry -> DXBC pulse。两条路径不会互相干扰
 - amp=0 或 speed=0 自动退回静态颜色，关闭 pulse 等效于不调用动画分支
 
 **4A 备选（未采用）**：给 iris.shpk 同样做 DXBC + ColorTable patch。工作量中等，但没有实际收益（iris 单层）
@@ -163,7 +163,7 @@ cbuffer g_PbrParameterCommon
 
 ## 三、ColorTable 每层数据布局
 
-ColorTable 是 8 × 32 的 half4 纹理，每 rowPair 两行写相同值（bilinear 填充）。vanilla 只用到 halfs 0..10 + 16（PBR 字段），其余对我们可用。最终布局：
+ColorTable 是 8 * 32 的 half4 纹理，每 rowPair 两行写相同值（bilinear 填充）。vanilla 只用到 halfs 0..10 + 16（PBR 字段），其余对我们可用。最终布局：
 
 | Half | 含义 | 引入阶段 |
 |---|---|---|
@@ -171,8 +171,8 @@ ColorTable 是 8 × 32 的 half4 纹理，每 rowPair 两行写相同值（bilin
 | 12 | speed (Hz) | 1 |
 | 13 | amplitude (0..1) | 1 |
 | 14 | mode (0=Pulse, 1=Flicker, 2=Gradient, 3=Ripple) | 2-5 |
-| 15 | 备用 | — |
-| 16 | (vanilla roughness — 保留不动) | — |
+| 15 | 备用 | -- |
+| 16 | (vanilla roughness -- 保留不动) | -- |
 | 17-19 | dualColor / Gradient colorB RGB | 3 |
 | 20 | ripple centerU | 5 |
 | 21 | ripple centerV | 5 |
@@ -181,7 +181,7 @@ ColorTable 是 8 × 32 的 half4 纹理，每 rowPair 两行写相同值（bilin
 | 24 | ripple dirX (cos(angle)) | 5b |
 | 25 | ripple dirY (sin(angle)) | 5b |
 | 26 | dualActive (1=Gradient 或 Ripple+dual) | 5b |
-| 27 | 备用 | — |
+| 27 | 备用 | -- |
 
 **最初的 cb0[19] 方案已废弃**（参见阶段 1 架构决策记录）。
 
@@ -190,17 +190,17 @@ ColorTable 是 8 × 32 的 half4 纹理，每 rowPair 两行写相同值（bilin
 ## 四、DXBC Patcher 现状
 
 生产实现在 **C#** (`SkinShpkPatcher.cs`)，不走独立 Python 脚本。Python 工具 (`ShaderPatcher/`) 保留为研究辅助：
-- `parse_shpk.py` — dump vanilla shpk 结构
-- `gen_pulse_tokens.py` / `gen_flicker_tokens.py` / `gen_gradient_tokens.py` / `gen_ripple_tokens.py` / `gen_ripple_ext_tokens.py` — 编译参考 HLSL，提取 DXBC token 模板
-- `verify_*_payload.py` — payload 字节级自检（opcode 长度字段 vs 实际 token 数），字节写错会被抓住
-- `scan_cb0_usage.py` — 风险扫描
-- `dump_ps19_inputs.py` / `read_vanilla_ps19.py` — 调试辅助
+- `parse_shpk.py` -- dump vanilla shpk 结构
+- `gen_pulse_tokens.py` / `gen_flicker_tokens.py` / `gen_gradient_tokens.py` / `gen_ripple_tokens.py` / `gen_ripple_ext_tokens.py` -- 编译参考 HLSL，提取 DXBC token 模板
+- `verify_*_payload.py` -- payload 字节级自检（opcode 长度字段 vs 实际 token 数），字节写错会被抓住
+- `scan_cb0_usage.py` -- 风险扫描
+- `dump_ps19_inputs.py` / `read_vanilla_ps19.py` -- 调试辅助
 
 C# 侧注入流程（`PatchSinglePs`）按以下顺序串联：
-1. `PatchShexAddDeclarations` — 添加 s5 sampler + t10 texture
-2. `PatchShexReplaceEmissive` — 把 vanilla 的 `mul cb0[3]*cb0[3]` + `mul r0.z*r1` 替换为 `mad V + mov U + sample r1` 读 ColorTable
-3. `PatchShexExtendCb0` — 保留（stage 0 遗留，cb0[18..19] dcl 已扩容，虽然实际没用到）
-4. `PatchShexInjectPulseModulation` — 在 emissive sample 之后插入完整的动画调制 payload（当前 36 指令 / 276 token，包含 pulse / flicker / gradient / ripple + 方向 + 双色 四合一逻辑）
+1. `PatchShexAddDeclarations` -- 添加 s5 sampler + t10 texture
+2. `PatchShexReplaceEmissive` -- 把 vanilla 的 `mul cb0[3]*cb0[3]` + `mul r0.z*r1` 替换为 `mad V + mov U + sample r1` 读 ColorTable
+3. `PatchShexExtendCb0` -- 保留（stage 0 遗留，cb0[18..19] dcl 已扩容，虽然实际没用到）
+4. `PatchShexInjectPulseModulation` -- 在 emissive sample 之后插入完整的动画调制 payload（当前 36 指令 / 276 token，包含 pulse / flicker / gradient / ripple + 方向 + 双色 四合一逻辑）
 
 失败回退：若 emissive 模式匹配失败（24/32 PS 有此情况），整个 PS 跳过。pulse 注入失败不阻塞，记录日志继续。
 
@@ -221,9 +221,9 @@ C# 侧注入流程（`PatchSinglePs`）按以下顺序串联：
 
 | 阶段 | 状态 | 备注 |
 |---|---|---|
-| 0 — 基础设施 | 完成 2026-04-17 | CB0 dcl [18]→[20]，零视觉影响 |
-| 1 — Pulse | 完成 2026-04-17 | 每层独立 via ColorTable column 3 |
-| 2 — Flicker | 完成 2026-04-17 | sin → sign 方波，DXBC +32 tokens，iris 同步支持 |
-| 3 — Gradient | 完成 2026-04-18 | 双色 lerp，CT col 4 存 colorB，DXBC +77 tokens |
-| 4 — Iris pulse | 完成 2026-04-17 | 路线 4B：EmissiveCBufferHook + Stopwatch 实时调制 |
-| 5 — Ripple | 完成 2026-04-18 | v2.xy UV 距离场 + CT col 5 + col 6，三种方向（radial/linear/bidir）+ 双色，DXBC 最终 36 指令 / 276 token |
+| 0 -- 基础设施 | 完成 2026-04-17 | CB0 dcl [18]->[20]，零视觉影响 |
+| 1 -- Pulse | 完成 2026-04-17 | 每层独立 via ColorTable column 3 |
+| 2 -- Flicker | 完成 2026-04-17 | sin -> sign 方波，DXBC +32 tokens，iris 同步支持 |
+| 3 -- Gradient | 完成 2026-04-18 | 双色 lerp，CT col 4 存 colorB，DXBC +77 tokens |
+| 4 -- Iris pulse | 完成 2026-04-17 | 路线 4B：EmissiveCBufferHook + Stopwatch 实时调制 |
+| 5 -- Ripple | 完成 2026-04-18 | v2.xy UV 距离场 + CT col 5 + col 6，三种方向（radial/linear/bidir）+ 双色，DXBC 最终 36 指令 / 276 token |

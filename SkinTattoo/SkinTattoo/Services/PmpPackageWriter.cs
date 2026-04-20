@@ -99,7 +99,7 @@ public static class PmpPackageWriter
     }
 
     // Type=Multi so each decal group can be independently toggled in Penumbra's UI.
-    // Priority 0 on all options — they target non-overlapping materials in practice,
+    // Priority 0 on all options -- they target non-overlapping materials in practice,
     // and letting users reorder in Penumbra covers any conflict.
     private static void WriteDecalsGroup(Utf8JsonWriter w, ModExportOptions options, List<GroupExport> groups)
     {

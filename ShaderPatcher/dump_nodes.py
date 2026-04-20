@@ -112,7 +112,7 @@ def parse_shpk_nodes(path):
         pass_cnt = u32()
         pass_indices = list(read_bytes(16))
         if version >= 0x0D01:
-            skip(8)   # unk131Keys (2 × u32)
+            skip(8)   # unk131Keys (2 * u32)
         sys_vals  = [u32() for _ in range(sys_key_cnt)]
         scn_vals  = [u32() for _ in range(scn_key_cnt)]
         mat_vals  = [u32() for _ in range(mat_key_cnt)]
@@ -174,7 +174,7 @@ def group_by_skintype(parsed):
 
 
 def find_pass2_lighting_ps(parsed):
-    """pass[2] is typically the main deferred lighting PS (SubView=6 → PassIndices[6]=2).
+    """pass[2] is typically the main deferred lighting PS (SubView=6 -> PassIndices[6]=2).
     Dump the PS list per SkinType for pass index 2 specifically."""
     sk_idx = parsed['skin_type_idx']
     print("\n== pass[2] LIGHTING PS by SkinType ==")

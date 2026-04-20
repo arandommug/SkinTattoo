@@ -130,7 +130,7 @@ public class ModExportService : IDisposable
                     }
 
                     // Shared assets (patched skin_ct.shpk) always load with the mod,
-                    // not per-option — otherwise disabling one decal group would drop
+                    // not per-option -- otherwise disabling one decal group would drop
                     // the shader that other enabled groups still need.
                     var groupFiles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                     foreach (var (gp, rp) in groupRedirects)

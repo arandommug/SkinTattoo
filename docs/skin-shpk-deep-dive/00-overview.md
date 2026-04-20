@@ -16,7 +16,7 @@
 | Ch1 | shpk 二进制容器与 node/selector 选择链路 | 01-shpk-structure.md | Penumbra `ShpkFile.cs`、`parse_shpk.py`、XIV Docs 格式页 |
 | Ch2 | skin.shpk 四个 SkinType 分支（Face/Body/BodyJJM/Emissive）的 PS 集合、pass 功能、节点分裂规律 | 02-skintype-branches.md | Ch1；我们运行时 log 的 NodeDump 输出；vanilla shpk 解析 |
 | Ch3 | DXBC 级别对比 Body PS 代表样本 vs Emissive PS[19]：资源绑定、寄存器布局、主要代码段 | 03-dxbc-body-vs-emissive.md | Ch2；ShaderPatcher/reference 现有反汇编 + 新提取的 Body PS |
-| Ch4 | 全部 cbuffer 清单与字段含义（g_MaterialParameter, g_CommonParameter, g_CameraParameter, g_InstanceParameter, g_MaterialParameterDynamic, g_AmbientParam, …）以及各分支的差异 | 04-cbuffers.md | Ch3；PS 反汇编头部 cbuffer 声明 |
+| Ch4 | 全部 cbuffer 清单与字段含义（g_MaterialParameter, g_CommonParameter, g_CameraParameter, g_InstanceParameter, g_MaterialParameterDynamic, g_AmbientParam, ...）以及各分支的差异 | 04-cbuffers.md | Ch3；PS 反汇编头部 cbuffer 声明 |
 | Ch5 | 接缝成因物理解释 + A/B/C 三条改造路径的工程评估（工作量、误伤面、验证门槛） | 05-seam-and-fix-paths.md | Ch2-Ch4 |
 | Ch6（候选） | 引擎侧的 shader 选择 fast-path（IDA 反编译对照） | 06-engine-fastpath.md | route-c-ida-research.md；IDA 现场 |
 | Ch7（候选） | 与其它 shpk 的关系（iris/character/charactertattoo）、共享 cbuffer/sampler | 07-cross-shpk.md | Ch4 |
@@ -40,7 +40,7 @@
 | Selector | `sysKey + sceneKey*31 + matKey*961 + subViewKey*29791`，用于在 `NodeSelectors` 字典里反查 node |
 | SkinType | skin.shpk 里 MaterialKey 之一（CRC `0x380CAED0`），当前可选值：Face / Body / BodyJJM / Emissive / Hrothgar（部分版本）/ ... |
 | Pass[2] LIGHTING PS | skin.shpk node 的 Pass[2] 位置固定是"主光照 PS"（deferred 主场景 SubView 使用），决定实际皮肤光照观感 |
-| ColorTable | mtrl 末尾挂的 32×8 vec4 浮点表，character.shpk/skin_ct.shpk 等会用它做 per-row PBR；skin.shpk 原版不读 |
+| ColorTable | mtrl 末尾挂的 32*8 vec4 浮点表，character.shpk/skin_ct.shpk 等会用它做 per-row PBR；skin.shpk 原版不读 |
 | DXBC | DirectX Byte Code，SM5 shader 的二进制格式，含 SHEX（指令流）/RDEF（资源定义）/ISGN/OSGN/STAT 等 chunk |
 
 ## 术语以外的关键符号

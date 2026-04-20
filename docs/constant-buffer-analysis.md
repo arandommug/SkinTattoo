@@ -1,11 +1,11 @@
-# ConstantBuffer Reverse Engineering Analysis — Real-time Emissive Color Updates
+# ConstantBuffer Reverse Engineering Analysis -- Real-time Emissive Color Updates
 
 > Based on IDA analysis of ffxiv_dx11.exe (2026-04-06), game version 7.x
 
 ## 1. ConstantBuffer Memory Layout (0x70 bytes)
 
 ```
-Inheritance chain: ConstantBuffer → Buffer → Resource → DelayedReleaseClassBase → ReferencedClassBase
+Inheritance chain: ConstantBuffer -> Buffer -> Resource -> DelayedReleaseClassBase -> ReferencedClassBase
 ```
 
 | Offset | Size | Field | Description |
@@ -53,7 +53,7 @@ Inheritance chain: ConstantBuffer → Buffer → Resource → DelayedReleaseClas
 
 ## 2. Key Functions
 
-### CreateConstantBuffer — `sub_140214640`
+### CreateConstantBuffer -- `sub_140214640`
 
 ```
 Call signature (from CLAUDE.md): "E8 ?? ?? ?? ?? 48 89 47 ?? B0"
@@ -64,7 +64,7 @@ Address: call site at 0x1403388fc, function body sub_140214640
 - Calls `sub_14020D4C0(obj, size, flags)` to initialize the buffer
 - Allocates CPU memory or D3D11Buffer based on flags
 
-### LoadSourcePointer — `sub_14020D9A0`
+### LoadSourcePointer -- `sub_14020D9A0`
 
 ```
 C# signature: "E8 ?? ?? ?? ?? 45 0F B6 FC 48 85 C0"
@@ -74,9 +74,9 @@ Prototype: void* LoadSourcePointer(int byteOffset, int byteSize, byte flags = 2)
 **Purpose**: Obtains a writable CPU pointer and marks the dirty region.
 
 Flow for Flags=0x4 (static material CBuffer):
-1. Check `(Flags & 0x4003) == 0` → pass
-2. Check `(callFlags & 1) == 0` → pass (default flags=2)
-3. Check `(Flags & 0x4002) == 0` → enter CPU path
+1. Check `(Flags & 0x4003) == 0` -> pass
+2. Check `(callFlags & 1) == 0` -> pass (default flags=2)
+3. Check `(Flags & 0x4002) == 0` -> enter CPU path
 4. Set `DirtySize (+0x34) = ByteSize` (mark entire buffer as dirty)
 5. Get `Buffer[frameIndex] (+0x50/+0x58/+0x60)`
 6. Set `UnsafeSourcePointer (+0x28) = Buffer[frameIndex]`
@@ -84,7 +84,7 @@ Flow for Flags=0x4 (static material CBuffer):
 
 **Frame index**: `dword_1427F9474` global variable, cycles 0/1/2.
 
-### Render Submission — `sub_140229A10`
+### Render Submission -- `sub_140229A10`
 
 Called within OnRenderMaterial to build render commands:
 
@@ -122,17 +122,17 @@ C# declaration: ModelRenderer.OnRenderMaterial(ushort* outFlags, OnRenderModelPa
 
 Modifying CBuffer data before step 4 = takes effect immediately in the current frame.
 
-## 4. Material → CBuffer → Emissive Access Path
+## 4. Material -> CBuffer -> Emissive Access Path
 
 ```
-Material (+0x10) → MaterialResourceHandle
-    (+0xC8) → ShaderPackageResourceHandle
+Material (+0x10) -> MaterialResourceHandle
+    (+0xC8) -> ShaderPackageResourceHandle
         ->ShaderPackage
-            .MaterialElements[] → { CRC, Offset, Size }
-                CRC == 0x38A64362 → Offset of g_EmissiveColor
+            .MaterialElements[] -> { CRC, Offset, Size }
+                CRC == 0x38A64362 -> Offset of g_EmissiveColor
 
-Material (+0x28) → ConstantBuffer* (MaterialParameterCBuffer)
-    (+0x50) → CPU Buffer data
+Material (+0x28) -> ConstantBuffer* (MaterialParameterCBuffer)
+    (+0x50) -> CPU Buffer data
         [Offset]     = float R
         [Offset + 4] = float G  
         [Offset + 8] = float B
@@ -162,18 +162,18 @@ struct MaterialElement {  // 8 bytes
 
 ```
 Hook ModelRenderer.OnRenderMaterial
-  ↓
+  v
 Identify target material (compare MaterialResourceHandle path)
-  ↓
+  v
 Get Material->MaterialParameterCBuffer
-  ↓
+  v
 Look up g_EmissiveColor offset from ShaderPackage.MaterialElements
-  ↓
+  v
 Call LoadSourcePointer(offset, 12, 2) to get writable pointer + mark dirty
-  ↓
+  v
 Write new RGB values
-  ↓
-Call original function → render pipeline reads updated data → GPU upload
+  v
+Call original function -> render pipeline reads updated data -> GPU upload
 ```
 
 **Advantages**:

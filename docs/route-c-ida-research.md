@@ -1,11 +1,11 @@
-# Route C — IDA Research Supplement
+# Route C -- IDA Research Supplement
 
 > Researched on 2026-04-07. Follows up on `PBR材质属性独立化调研.md` and `材质替换路线研究.md`.
 > Performed an initial decompilation pass via IDA Pro MCP connected to ffxiv_dx11.exe (pid 11708), confirming several facts critical to Route C.
 
 ## Research Objectives
 
-Answer the 6 unknowns listed at the end of `PBR材质属性独立化调研.md` under "Route C — items to investigate" (especially #1/#2/#5), and gather concrete behavior details about the vanilla engine's shader package / material loading mechanism for the v2 spec.
+Answer the 6 unknowns listed at the end of `PBR材质属性独立化调研.md` under "Route C -- items to investigate" (especially #1/#2/#5), and gather concrete behavior details about the vanilla engine's shader package / material loading mechanism for the v2 spec.
 
 ## Confirmed Facts
 
@@ -38,16 +38,16 @@ Load results are stored into the `a1 + 8 + i*8` slot array provided by the calle
 
 This is the most valuable unexpected finding from the IDA research.
 
-**Implication**: The vanilla engine already ships a dedicated character decal shader package — the name translates literally to "character tattoo." It sits in the .shpk string table at the same level as character.shpk / characterlegacy.shpk.
+**Implication**: The vanilla engine already ships a dedicated character decal shader package -- the name translates literally to "character tattoo." It sits in the .shpk string table at the same level as character.shpk / characterlegacy.shpk.
 
 **Potential significance for v2 Route C**:
 
-- The previous Route C goal was to convert skin.shpk → character.shpk
+- The previous Route C goal was to convert skin.shpk -> character.shpk
 - However, character.shpk is an equipment shader and may carry more attributes than body materials need (dye / tile / sphere map, etc.)
-- The name charactertattoo.shpk implies it was designed for body decals — it may be a lighter, more direct conversion target
+- The name charactertattoo.shpk implies it was designed for body decals -- it may be a lighter, more direct conversion target
 - **The v2 spec should compare the sampler lists + ConstantBuffer fields of all three shader files and choose the most suitable conversion target**
 
-**Note**: This comparison **does not require IDA** — you can directly use Penumbra's `Penumbra.GameData/Files/ShpkFile.cs` to parse vanilla `.shpk` files and extract sampler names / CBuffer field names / shader key lists. This is a more accurate and convenient path than IDA decompilation.
+**Note**: This comparison **does not require IDA** -- you can directly use Penumbra's `Penumbra.GameData/Files/ShpkFile.cs` to parse vanilla `.shpk` files and extract sampler names / CBuffer field names / shader key lists. This is a more accurate and convenient path than IDA decompilation.
 
 ### Fact 13: Shader package load entry = ResourceManager generic file loader
 
@@ -55,10 +55,10 @@ Concrete call chain (during init):
 
 ```
 sub_1402AAF30 / sub_1402ACEE0
-  → sub_1402ED040 (when byte_14298F490 != 0)  // generic file resource loader
-  → sub_1402ECFA0 (otherwise)                  // another variant of the above (cache disabled?)
-      → sub_1402ECD10  // path → hash + canonicalize
-      → sub_140304A50  // ResourceManager.LoadFile(qword_14298F518, ...)
+  -> sub_1402ED040 (when byte_14298F490 != 0)  // generic file resource loader
+  -> sub_1402ECFA0 (otherwise)                  // another variant of the above (cache disabled?)
+      -> sub_1402ECD10  // path -> hash + canonicalize
+      -> sub_140304A50  // ResourceManager.LoadFile(qword_14298F518, ...)
 ```
 
 `qword_14298F518` is the global ResourceManager instance (pointer to the `Client.System.Resource.ResourceManager` singleton).
@@ -94,7 +94,7 @@ Confirmed indirectly through the field access pattern in `sub_14026EE10` (the ob
 | `+200` (0xC8) | `ShaderPackage*` | ShaderPackageResourceHandle pointer |
 | `+232` (0xE8) | `ShaderPackageFlags` (DWORD) | Render branch bits (`& 0x4000`, `& 0x8000`, etc.) |
 
-**Consistent with FFXIVClientStructs' existing MaterialResourceHandle definition** — the FFXIVClientStructs struct definitions already referenced by the SkinTattoo project can be trusted; there is no need to re-model them in IDA.
+**Consistent with FFXIVClientStructs' existing MaterialResourceHandle definition** -- the FFXIVClientStructs struct definitions already referenced by the SkinTattoo project can be trusted; there is no need to re-model them in IDA.
 
 ### Fact 16: The vanilla engine has a built-in "shader package fast-path dispatch" mechanism
 
@@ -109,9 +109,9 @@ else if (v17 == *(QWORD*)(a1 + 544)) { /* fast path B */ }
 
 `a1 + 536/544/552/560/568` are the 5 ShaderPackage pointers cached in the ModelRenderer instance. Pointer equality comparisons identify which shader type a material uses, and different flag branches are taken accordingly.
 
-**Significance**: The vanilla engine itself needs the ability to "dispatch by shader type" — this proves that shader packages are not treated equally but have explicit "special type" distinctions. The specific 5 shaders stored in these slots were not traced further (finding the ModelRenderer init function would confirm them), but they are highly likely to include skin / character / characterlegacy / characterglass / hair (or a similar combination) — i.e. the shaders that the vanilla engine considers "important."
+**Significance**: The vanilla engine itself needs the ability to "dispatch by shader type" -- this proves that shader packages are not treated equally but have explicit "special type" distinctions. The specific 5 shaders stored in these slots were not traced further (finding the ModelRenderer init function would confirm them), but they are highly likely to include skin / character / characterlegacy / characterglass / hair (or a similar combination) -- i.e. the shaders that the vanilla engine considers "important."
 
-**Impact on Route C**: If we switch a `.mtrl`'s ShaderPackage to character.shpk, the fast-path comparison inside OnRenderMaterial will automatically take the character branch — no hook intervention is needed. Simply replacing the ShaderPackage handle is sufficient.
+**Impact on Route C**: If we switch a `.mtrl`'s ShaderPackage to character.shpk, the fast-path comparison inside OnRenderMaterial will automatically take the character branch -- no hook intervention is needed. Simply replacing the ShaderPackage handle is sufficient.
 
 ## Concrete Impact on Route C
 
@@ -131,7 +131,7 @@ Based on the above facts, the Route C implementation path can be **significantly
 1. **Parse vanilla's three candidate shader package files** (using Penumbra ShpkFile):
    - `shader/sm5/shpk/skin.shpk`
    - `shader/sm5/shpk/character.shpk`
-   - `shader/sm5/shpk/charactertattoo.shpk` ← new candidate
+   - `shader/sm5/shpk/charactertattoo.shpk` <- new candidate
    - Extract each one's sampler list + ConstantBuffer field names + ShaderKey options
 2. **Decide on the conversion target**: Based on the three-way comparison, choose the most suitable target shader for body materials (most likely charactertattoo.shpk rather than character.shpk)
 3. **Build a .mtrl rewriter**: Use Penumbra's `MtrlFile.AddRemove` API (already available) to write a new `.mtrl` containing:
@@ -145,9 +145,9 @@ Based on the above facts, the Route C implementation path can be **significantly
 
 | Unknown | Impact | Resolution path |
 |---|---|---|
-| Which 5 ShaderPackages are cached at ModelRenderer +536..+568 | Affects whether switching to character.shpk triggers any fast-path side effects | Find the ModelRenderer init function (xref write to `+ 536`) — defer to v2 spec phase |
-| Sampler list diff between the three candidate shaders | Determines which textures need to be added when rewriting `.mtrl` | Parse with Penumbra ShpkFile — do in v2 spec phase |
-| Whether `.mtrl` loading does special preprocessing on ShaderPackageName | Affects whether a simple string replacement can switch the shader | Find MaterialResourceHandle load chain — do during v2 implementation |
+| Which 5 ShaderPackages are cached at ModelRenderer +536..+568 | Affects whether switching to character.shpk triggers any fast-path side effects | Find the ModelRenderer init function (xref write to `+ 536`) -- defer to v2 spec phase |
+| Sampler list diff between the three candidate shaders | Determines which textures need to be added when rewriting `.mtrl` | Parse with Penumbra ShpkFile -- do in v2 spec phase |
+| Whether `.mtrl` loading does special preprocessing on ShaderPackageName | Affects whether a simple string replacement can switch the shader | Find MaterialResourceHandle load chain -- do during v2 implementation |
 
 ## Resource Index (IDA Addresses)
 
@@ -171,7 +171,7 @@ Based on the above facts, the Route C implementation path can be **significantly
 
 The engineering difficulty of Route C is **lower than previously estimated**. The core reasons are:
 
-1. Switching the shader package requires no hook — changing the ShaderPackageName field in the `.mtrl` file is sufficient
+1. Switching the shader package requires no hook -- changing the ShaderPackageName field in the `.mtrl` file is sufficient
 2. The engine dispatches automatically by pointer comparison; no runtime intervention is needed
 3. Key information (sampler/CBuffer lists) can be obtained by parsing `.shpk` files, without further IDA work
 4. **The discovery of charactertattoo.shpk may be a game-changer**, making the v2 conversion target lighter
@@ -181,4 +181,4 @@ However, the hard parts of Route C remain unchanged:
 - Adding placeholder textures where necessary (e.g. index/mask textures)
 - Integration with SkinTattoo's existing compositor (writing the row pair number into normal.a only makes sense after the `.mtrl` rewrite is complete)
 
-**v2 spec writing can start in parallel** — the remaining unknowns can be fully resolved by parsing vanilla `.shpk` / `.mtrl` files; no further IDA work needs to be waited on.
+**v2 spec writing can start in parallel** -- the remaining unknowns can be fully resolved by parsing vanilla `.shpk` / `.mtrl` files; no further IDA work needs to be waited on.

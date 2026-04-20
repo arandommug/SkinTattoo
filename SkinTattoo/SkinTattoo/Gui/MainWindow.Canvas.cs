@@ -15,7 +15,7 @@ public partial class MainWindow
     // UV mesh wireframe toggle
     private bool showUvWireframe;
 
-    // ── Center Panel: Interactive UV Canvas ──────────────────────────────────
+    // -- Center Panel: Interactive UV Canvas ----------------------------------
     //
     // Coordinate system:
     //   "virtual UV" = square [0,1]x[0,1] representing maxDim x maxDim pixels

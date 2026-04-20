@@ -28,7 +28,7 @@ public class DecalImageLoader
 
     public void ClearCache() => imageCache.Clear();
 
-    /// <summary>Alpha looks like a baked-in emissive mask (≥10% transparent + ≥0.1% lit).</summary>
+    /// <summary>Alpha looks like a baked-in emissive mask (>=10% transparent + >=0.1% lit).</summary>
     public static bool LooksLikeEmissiveMask(byte[] rgba)
     {
         if (rgba == null || rgba.Length < 16) return false;

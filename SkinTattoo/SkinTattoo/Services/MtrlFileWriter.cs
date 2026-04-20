@@ -32,13 +32,13 @@ public static class MtrlFileWriter
         try
         {
             // Lumina's MtrlFile parser can't handle Dawntrail ColorTable (2048 bytes)
-            // — it only reads 544 bytes then parses MaterialHeader from the wrong
+            // -- it only reads 544 bytes then parses MaterialHeader from the wrong
             // offset, producing garbage for shader keys / constants / samplers.
             // Detect this case and use raw-byte patching instead.
             if (TryPatchEmissiveRaw(originalBytes, outputPath, emissiveColor, out emissiveByteOffset))
                 return true;
 
-            // Fallback: Lumina parsed correctly — use the structured rebuild path.
+            // Fallback: Lumina parsed correctly -- use the structured rebuild path.
             return WriteEmissiveMtrlViaLumina(mtrl, originalBytes, outputPath, emissiveColor, out emissiveByteOffset);
         }
         catch (Exception ex)
@@ -59,7 +59,7 @@ public static class MtrlFileWriter
         emissiveByteOffset = -1;
         if (src.Length < 16) return false;
 
-        // ── Parse FileHeader ──
+        // -- Parse FileHeader --
         int dataSetSize = BitConverter.ToUInt16(src, 6);
         int stringTableSize = BitConverter.ToUInt16(src, 8);
         int texCount = src[12];
@@ -67,7 +67,7 @@ public static class MtrlFileWriter
         int colorCount = src[14];
         int addlDataSize = src[15];
 
-        // ── Locate MaterialHeader ──
+        // -- Locate MaterialHeader --
         int matHeaderOff = 16
             + texCount * 4
             + uvCount * 4
@@ -83,13 +83,13 @@ public static class MtrlFileWriter
         int constantCount = BitConverter.ToUInt16(src, matHeaderOff + 4);
         int samplerCount = BitConverter.ToUInt16(src, matHeaderOff + 6);
 
-        // ── Locate Constants array ──
+        // -- Locate Constants array --
         int constantsOff = matHeaderOff + 12 + shaderKeyCount * 8;
         // Each constant: uint32 ID + uint16 ValueOffset + uint16 ValueSize = 8 bytes
         int samplersOff = constantsOff + constantCount * 8;
         int shaderValuesOff = samplersOff + samplerCount * 12;
 
-        // ── Find g_EmissiveColor constant ──
+        // -- Find g_EmissiveColor constant --
         int emissiveAbsOff = -1;
         int irisRingAbsOff = -1;
 
@@ -141,7 +141,7 @@ public static class MtrlFileWriter
     {
         emissiveByteOffset = -1;
 
-        // Lumina skips AdditionalData — extract from raw bytes
+        // Lumina skips AdditionalData -- extract from raw bytes
         int addlDataOffset = 16
             + mtrl.FileHeader.TextureCount * 4
             + mtrl.FileHeader.UvSetCount * 4
@@ -231,7 +231,7 @@ public static class MtrlFileWriter
 
         if (isSkinShpk && !foundEmissive)
         {
-            // Generate Dawntrail ColorTable (8 vec4 × 32 rows = 2048 bytes of Half)
+            // Generate Dawntrail ColorTable (8 vec4 * 32 rows = 2048 bytes of Half)
             // with emissive color in all rows so the patched shader picks it up.
             colorTableData = BuildSkinColorTable(emissiveColor);
 
@@ -240,8 +240,8 @@ public static class MtrlFileWriter
             {
                 uint flags = BitConverter.ToUInt32(additionalData, 0);
                 flags |= 0x4;           // HasColorTable
-                flags |= (3u << 4);     // widthLog = 3 → width = 8
-                flags |= (5u << 8);     // heightLog = 5 → height = 32
+                flags |= (3u << 4);     // widthLog = 3 -> width = 8
+                flags |= (5u << 8);     // heightLog = 5 -> height = 32
                 BitConverter.TryWriteBytes(additionalData.AsSpan(0, 4), flags);
             }
         }
@@ -269,7 +269,7 @@ public static class MtrlFileWriter
     /// <summary>Build a Dawntrail ColorTable with per-layer emissive colors.</summary>
     public static byte[] BuildSkinColorTablePerLayer(List<Core.DecalLayer> layers)
     {
-        var bytes = new byte[2048]; // 32 rows × 32 halfs × 2 bytes
+        var bytes = new byte[2048]; // 32 rows * 32 halfs * 2 bytes
 
         void WriteHalf(int row, int idx, float value)
         {
@@ -287,7 +287,7 @@ public static class MtrlFileWriter
 
         // Write per-layer emissive into assigned row pairs. The patched shader samples
         // ColorTable at row = (normal.a*30/255 + 0.5), which for discrete normal.a=k*17
-        // lands exactly at row k*2+0.5 — the midpoint of a row pair. GPU linear filter
+        // lands exactly at row k*2+0.5 -- the midpoint of a row pair. GPU linear filter
         // lerps rowLower and rowLower+1, so we must write the same emissive to BOTH
         // rows; otherwise the layer appears at 50% brightness.
         foreach (var layer in layers)
@@ -315,7 +315,7 @@ public static class MtrlFileWriter
             float centerV = isRipple ? layer.UvCenter.Y : 0f;
             float freq    = isRipple ? layer.AnimFreq : 0f;
             float dirMode = isRipple ? (float)(int)layer.AnimDirMode : 0f;
-            // Direction unit vector precomputed from angle (shader does d·dir projection).
+            // Direction unit vector precomputed from angle (shader does d.dir projection).
             float angleRad = layer.AnimDirAngle * MathF.PI / 180f;
             float dirX = isRipple ? MathF.Cos(angleRad) : 1f;
             float dirY = isRipple ? MathF.Sin(angleRad) : 0f;
@@ -355,7 +355,7 @@ public static class MtrlFileWriter
 
     /// <summary>Build ColorTable for a single Normal-target emissive layer.
     /// Row k (1..30) holds emissive scaled to k/30 so the patched shader's
-    /// normal.alpha → row UV mapping yields a smooth intensity ramp across the
+    /// normal.alpha -> row UV mapping yields a smooth intensity ramp across the
     /// full alpha range; row 0 stays unlit so alpha=0 pixels don't glow.</summary>
     public static byte[] BuildSkinColorTableNormalEmissive(Core.DecalLayer layer)
     {
@@ -558,15 +558,15 @@ public static class MtrlFileWriter
     }
 
     /// <summary>
-    /// Build a Dawntrail ColorTable (8 vec4 × 32 rows = 1024 Half = 2048 bytes)
+    /// Build a Dawntrail ColorTable (8 vec4 * 32 rows = 1024 Half = 2048 bytes)
     /// with the given emissive color set in ALL rows. This ensures any normal.alpha
-    /// value (row index) produces the same emissive color — matching the old uniform behavior
+    /// value (row index) produces the same emissive color -- matching the old uniform behavior
     /// while proving the ColorTable pipeline works end-to-end.
     /// </summary>
     private static byte[] BuildSkinColorTable(Vector3 emissiveColor)
     {
         const int rows = 32;
-        const int halfsPerRow = 32; // 8 vec4 × 4 halfs
+        const int halfsPerRow = 32; // 8 vec4 * 4 halfs
         var bytes = new byte[rows * halfsPerRow * 2]; // 2048 bytes
 
         void WriteHalf(int row, int idx, float value)
@@ -626,7 +626,7 @@ public static class MtrlFileWriter
         bw.Write(mtrl.FileHeader.TextureCount);
         bw.Write(mtrl.FileHeader.UvSetCount);
         bw.Write(effectiveColorSetCount);
-        // Use actual additionalData length — we may have expanded it from 0→4
+        // Use actual additionalData length -- we may have expanded it from 0->4
         // to store HasColorTable flags. Writing the original size would cause
         // the engine to skip our flags entirely.
         bw.Write((byte)additionalData.Length);

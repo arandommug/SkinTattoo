@@ -13,7 +13,7 @@ namespace SkinTattoo.Gui;
 
 public partial class MainWindow
 {
-    // ── Left Panel: Card-based layer list ──────────────────────────────────
+    // -- Left Panel: Card-based layer list ----------------------------------
 
     private void DrawLayerPanel()
     {
@@ -99,7 +99,7 @@ public partial class MainWindow
         var drawList = ImGui.GetWindowDrawList();
         var availWidth = ImGui.GetContentRegionAvail().X;
 
-        // ── Card header ──
+        // -- Card header --
         var headerStart = ImGui.GetCursorScreenPos();
         var headerHeight = ImGui.GetFrameHeight() + 4;
         var headerEnd = headerStart + new Vector2(availWidth, headerHeight);
@@ -183,7 +183,7 @@ public partial class MainWindow
 
         if (!group.IsExpanded) return;
 
-        // ── Card body ──
+        // -- Card body --
         var bodyStart = ImGui.GetCursorScreenPos();
 
         drawList.ChannelsSplit(2);

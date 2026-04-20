@@ -12,7 +12,7 @@ import os
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple, Dict
 
-# ── SM5.0 Opcode Definitions (D3D10_SB_OPCODE_TYPE) ──
+# -- SM5.0 Opcode Definitions (D3D10_SB_OPCODE_TYPE) --
 
 OPCODES = {
     0x00: "add", 0x01: "and", 0x02: "break", 0x03: "breakc",
@@ -68,7 +68,7 @@ RESOURCE_DIM = {
 # Opcodes in the declaration region
 DCL_OPCODES = set(range(0x58, 0x6B))
 
-# ── Data Classes ──
+# -- Data Classes --
 
 @dataclass
 class DxbcChunk:
@@ -79,7 +79,7 @@ class DxbcChunk:
 
 @dataclass
 class DxbcContainer:
-    checksum: Tuple[int, int, int, int]  # 4 × uint32
+    checksum: Tuple[int, int, int, int]  # 4 * uint32
     total_size: int
     chunks: List[DxbcChunk]
     raw: bytearray  # mutable copy of full file
@@ -111,7 +111,7 @@ class RdefBinding:
     flags: int
 
 
-# ── DXBC Checksum ──
+# -- DXBC Checksum --
 
 def compute_dxbc_checksum(data: bytearray) -> Tuple[int, int, int, int]:
     """Compute DXBC 128-bit checksum (custom MD5 variant).
@@ -127,7 +127,7 @@ def compute_dxbc_checksum(data: bytearray) -> Tuple[int, int, int, int]:
     return struct.unpack_from('<4I', digest)
 
 
-# ── DXBC Container Parser ──
+# -- DXBC Container Parser --
 
 def parse_dxbc(data: bytes) -> DxbcContainer:
     """Parse a DXBC binary container."""
@@ -164,7 +164,7 @@ def parse_dxbc(data: bytes) -> DxbcContainer:
     )
 
 
-# ── SHEX Parser ──
+# -- SHEX Parser --
 
 def parse_shex(chunk: DxbcChunk) -> Tuple[int, int, int, List[ShexInstruction]]:
     """Parse SHEX/SHDR chunk into instruction list.
@@ -229,7 +229,7 @@ def parse_shex(chunk: DxbcChunk) -> Tuple[int, int, int, List[ShexInstruction]]:
     return version_token, token_count, shader_type, instructions
 
 
-# ── RDEF Parser ──
+# -- RDEF Parser --
 
 def parse_rdef_bindings(chunk: DxbcChunk) -> List[RdefBinding]:
     """Parse resource bindings from RDEF chunk."""
@@ -276,7 +276,7 @@ def parse_rdef_bindings(chunk: DxbcChunk) -> List[RdefBinding]:
     return bindings
 
 
-# ── SHPK PS Extractor ──
+# -- SHPK PS Extractor --
 
 def extract_ps_from_shpk(shpk_path: str, ps_index: int) -> bytes:
     """Extract a pixel shader's DXBC blob from a .shpk file."""
@@ -355,7 +355,7 @@ def extract_ps_from_shpk(shpk_path: str, ps_index: int) -> bytes:
     return blob, entry
 
 
-# ── Analysis / Dump ──
+# -- Analysis / Dump --
 
 def dump_dxbc_info(dxbc: DxbcContainer):
     """Print human-readable summary of DXBC container."""
@@ -407,7 +407,7 @@ def find_emissive_instructions(instructions: List[ShexInstruction]) -> List[int]
     """Find the emissive calculation instructions in EMISSIVE PS variant.
 
     Looking for the pattern:
-      sample_b t5 → r0.xz  (normal map sample, r0.z = normal.alpha)
+      sample_b t5 -> r0.xz  (normal map sample, r0.z = normal.alpha)
       mul r1.xyz, cb0[3], cb0[3]  (g_EmissiveColor squared)
       mul r1.xyz, r0.z, r1  (mask * color)
 
@@ -430,7 +430,7 @@ def find_emissive_instructions(instructions: List[ShexInstruction]) -> List[int]
     return results
 
 
-# ── Main ──
+# -- Main --
 
 if __name__ == "__main__":
     script_dir = os.path.dirname(os.path.abspath(__file__))

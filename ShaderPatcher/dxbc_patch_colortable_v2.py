@@ -4,8 +4,8 @@ The original dxbc_patch_colortable.py hardcodes register index 1 for the emissiv
 dest register. This works for 8/32 Emissive pass[2] PSes (those where SceneKey maps
 to a variant with `mul r1.xyz, cb0[3]*cb0[3]`), but the remaining 24 PSes use r2
 (or other registers) as emissive dest. Those silently skip the ColorTable patch at
-runtime, falling back to vanilla `g_EmissiveColor² × normal.α × m_EmissiveColor_dyn`
-behavior — no per-layer emissive, no animation.
+runtime, falling back to vanilla `g_EmissiveColor^2 * normal.alpha * m_EmissiveColor_dyn`
+behavior -- no per-layer emissive, no animation.
 
 This module detects the emissive init pair generically and writes a replacement
 with the actual dest register and normal source register parameterized.
@@ -21,7 +21,7 @@ Gets replaced with (dynamically constructed):
 
 Notes:
   - For the 32 Emissive pass[2] PSes, normal swizzle is always `.zzzz` (normal.alpha
-    lands at the .z component after `sample_b t5.zxwy → r0.xz` or `r1.yz`).
+    lands at the .z component after `sample_b t5.zxwy -> r0.xz` or `r1.yz`).
   - If later evidence shows a PS with `.wwww` normal swizzle, the patcher would need
     to parameterize normal component too (currently fixed at .z).
 """
@@ -32,7 +32,7 @@ import sys
 from dxbc_patch_colortable import rebuild_dxbc, d3d_disassemble, d3d_validate
 
 
-# ── Emissive init detection (shared with dxbc_patch_gloss_mask) ──
+# -- Emissive init detection (shared with dxbc_patch_gloss_mask) --
 
 # Invariant 6-token tail of the first emissive init: `cb0[3].xyzx, cb0[3].xyzx`.
 _CB3_TAIL = struct.pack('<6I',
@@ -60,8 +60,8 @@ def find_emissive_init(shex_data: bytes):
 
     Returns (init1_pos, init2_pos, dest_reg, normal_reg, normal_comp) or None.
       - init1_pos / init2_pos: SHEX byte offsets of the 1st and 2nd MUL
-      - dest_reg: the rX register that holds emissive²
-      - normal_reg / normal_comp: rS.<comp> — register and component holding normal.alpha
+      - dest_reg: the rX register that holds emissive^2
+      - normal_reg / normal_comp: rS.<comp> -- register and component holding normal.alpha
     """
     for pos, tok, blen in _iter_shex_instructions(shex_data):
         opcode = tok & 0x7FF
@@ -103,7 +103,7 @@ def find_emissive_init(shex_data: bytes):
     return None
 
 
-# ── Replacement construction ──
+# -- Replacement construction --
 
 def build_colortable_replacement(dest_reg: int, normal_reg: int, normal_comp: int) -> bytes:
     """Build register-agnostic ColorTable sample replacement.
@@ -134,7 +134,7 @@ def build_colortable_replacement(dest_reg: int, normal_reg: int, normal_comp: in
     )
 
 
-# ── Patch API ──
+# -- Patch API --
 
 def patch_shex_replace_emissive_v2(shex_data: bytearray):
     """Return (patched_shex, info) where info = (dest_reg, normal_reg, normal_comp) or None.
@@ -206,7 +206,7 @@ if __name__ == "__main__":
         sys.exit(1)
     dest_reg, normal_reg, normal_comp = info
     print(f"Patched: emissive=r{dest_reg}, normal=r{normal_reg}.{'xyzw'[normal_comp]}")
-    print(f"Size: {len(original)} → {len(patched)} (delta {len(patched) - len(original):+d})")
+    print(f"Size: {len(original)} -> {len(patched)} (delta {len(patched) - len(original):+d})")
     with open(out_path, 'wb') as f:
         f.write(patched)
     print(f"Wrote: {out_path}")

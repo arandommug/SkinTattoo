@@ -76,8 +76,8 @@
     "multi_select": "Enter Multi-Select",
     "exit_multi_select": "Exit Multi-Select",
     "copy": "Copy",
-    "rotate_ccw_90": "CCW 90°",
-    "rotate_cw_90": "CW 90°",
+    "rotate_ccw_90": "CCW 90deg",
+    "rotate_cw_90": "CW 90deg",
     "mirror_x": "Mirror X",
     "mirror_y": "Mirror Y",
     "path": "Paths",
@@ -241,15 +241,15 @@
     "diffuse": "Diffuse",
     "mask": "Mask",
     "normal": "Normal",
-    "tooltip": "Which game texture the decal paints into.\nDiffuse — color, default\nMask — material mask, spec/roughness\nNormal — normal map, bump detail",
-    "auto_normal_detected": "PNG looks like a normal map — target set to Normal."
+    "tooltip": "Which game texture the decal paints into.\nDiffuse -- color, default\nMask -- material mask, spec/roughness\nNormal -- normal map, bump detail",
+    "auto_normal_detected": "PNG looks like a normal map -- target set to Normal."
   },
   "emissive_normal": {
-    "detected": "Detected emissive mask in Normal alpha — glow controlled by this layer",
+    "detected": "Detected emissive mask in Normal alpha -- glow controlled by this layer",
     "manual_enable_btn": "Enable glow",
     "manual_enable_tip": "Use the Normal map's alpha channel as the emissive mask",
     "disable_btn": "Disable glow",
-    "diffuse_locked": "Emissive controlled by a Normal layer — disabled here"
+    "diffuse_locked": "Emissive controlled by a Normal layer -- disabled here"
   },
   "enum": {
     "blendmode": {

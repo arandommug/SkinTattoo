@@ -66,14 +66,14 @@ def main():
         else:
             stack_fail.append((idx, "colortable:fail"))
 
-    print(f"\n== Stacked: gloss-mask → ColorTable v2 ==")
+    print(f"\n== Stacked: gloss-mask -> ColorTable v2 ==")
     print(f"  OK:   {len(stack_ok)}/32")
     print(f"  FAIL: {len(stack_fail)}")
     for i, e in stack_fail[:5]:
         print(f"    PS[{i}]: {e}")
 
     # Test 3: compare to v1 (old hardcoded r1 version)
-    # v1 would fail for r2/r3/... variants — we simulate by filtering on dest_reg==1
+    # v1 would fail for r2/r3/... variants -- we simulate by filtering on dest_reg==1
     v1_would_match = sum(1 for idx in ct_ok
                          if patch_dxbc_colortable_v2(extract_ps_from_parsed(shpk, idx)[0])[1][0] == 1)
     print(f"\n== Coverage vs v1 (r1 hardcoded) ==")

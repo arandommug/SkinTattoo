@@ -19,7 +19,7 @@
 - Set `DALAMUD_HOME` to the correct path via `Directory.Build.props`
 
 ### Lumina Version Conflict
-- **Dalamud CN ships with Lumina 2.4.2** — do not reference any other version via NuGet
+- **Dalamud CN ships with Lumina 2.4.2** -- do not reference any other version via NuGet
 - NuGet `Lumina 4.*` causes `IDataManager.GetFile<MdlFile>()` to return null (type mismatch)
 - Using the `AtmoOmen/Lumina` fork as a submodule resolves `.tex` file decoding
 
@@ -45,7 +45,7 @@
 
 ### Path Format Returned by GetPlayerResources
 - Returns `Dictionary<ushort, Dictionary<string, HashSet<string>>>`
-- Format: `objectIndex → diskPath → Set<gamePath>`
+- Format: `objectIndex -> diskPath -> Set<gamePath>`
 - **Note**: after applying a temporary mod, the disk path may become our own output file (preview.tex), creating a self-reference
 - Cache the original paths before creating the temporary mod
 
@@ -58,8 +58,8 @@
 ## .tex File Format
 
 ### Header (80 bytes)
-- offset 0: `uint32` attributes — must include `0x00800000` (TextureType2D)
-- offset 4: `uint32` format — `0x1450` = B8G8R8A8
+- offset 0: `uint32` attributes -- must include `0x00800000` (TextureType2D)
+- offset 4: `uint32` format -- `0x1450` = B8G8R8A8
 - offset 8: `uint16` width
 - offset 10: `uint16` height
 - offset 12: `uint16` depth (1)
@@ -78,7 +78,7 @@
 ## UV Space Decal vs 3D Projection
 
 ### Problems with 3D Projection
-- Orthographic projection into UV space causes decal fragmentation — because UV islands are scattered
+- Orthographic projection into UV space causes decal fragmentation -- because UV islands are scattered
 - A continuous 3D region may be spread across multiple UV islands
 - The result looks like a "shattered sticker"
 
@@ -100,7 +100,7 @@
 ### Concurrency Constraints in `PreviewService`
 - `UpdatePreviewFull` runs on the main thread; `StartAsyncInPlace` runs on a background `Task.Run`; `CompositeForExport` is also called via background `Task.Run`
 - All three paths share `baseTextureCache` / `compositeResults` / `previewDiskPaths` / `previewMtrlDiskPaths` / `emissiveOffsets` / `initializedRedirects`
-- **Must use `ConcurrentDictionary`** — using a plain `Dictionary` previously caused intermittent `InvalidOperationException` when sliding sliders, and live preview / export contaminating each other's state
+- **Must use `ConcurrentDictionary`** -- using a plain `Dictionary` previously caused intermittent `InvalidOperationException` when sliding sliders, and live preview / export contaminating each other's state
 - `EmissiveCBufferHook.targets` / `offsetCache` are also `ConcurrentDictionary` because the detour runs on the render thread while `SetTargetByPath` runs on the main thread
 
 ### Lumina Temp Files Must Not Use Fixed Filenames
@@ -109,7 +109,7 @@
 
 ### `EmissiveCBufferHook.Dispose` Order
 - Call `Disable()` before `hook.Dispose()`; otherwise `hook.Dispose()` may encounter an already-cleared dictionary on a new thread executing the detour
-- The rate-limit counter `errorCount` does not reset automatically — after the first 5 errors, logging goes silent; if "no new errors appear" during debugging, restart the plugin first
+- The rate-limit counter `errorCount` does not reset automatically -- after the first 5 errors, logging goes silent; if "no new errors appear" during debugging, restart the plugin first
 
 ## Mod Export (.pmp Packaging)
 
@@ -121,7 +121,7 @@
 ### `default_mod.json` Field Set
 - Penumbra's deserializer tolerates missing fields, but **omitting the composite fields `FileSwaps` / `Manipulations` causes them to use wrong defaults**
 - Full field list: `Version`, `Name`, `Description`, `Priority`, `Files`, `FileSwaps`, `Manipulations`
-- Keys in `Files` are game paths; values are paths relative to the mod root — **use forward slashes on both sides** (even on Windows)
+- Keys in `Files` are game paths; values are paths relative to the mod root -- **use forward slashes on both sides** (even on Windows)
 
 ### HTTP `/api/export` Must Be Wrapped in `Task.Run`
 - `ModExportService.Export` is synchronous; compositing + writing the zip takes several seconds

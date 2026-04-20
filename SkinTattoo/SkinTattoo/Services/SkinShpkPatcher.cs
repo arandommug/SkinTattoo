@@ -19,7 +19,7 @@ public static class SkinShpkPatcher
     private const uint CrcSamplerTable = 0x2005679F;
 
     // Full list of lighting-pass PSes discovered via NodeDump: every MATCH-FULL Emissive
-    // node's pass[2] (SubViewIndex=6 → lighting render stage) references one of these.
+    // node's pass[2] (SubViewIndex=6 -> lighting render stage) references one of these.
     // Patching only PS[19] covered 1/32 of render states; patching all 32 covers the full set.
     private static readonly int[] LightingPsIndices = {
         19, 28, 49, 58, 79, 88, 109, 118,
@@ -36,7 +36,7 @@ public static class SkinShpkPatcher
     private const uint CategoryVertexColorMode = 0xF52CCF05;
     private const uint ValueVertexColorEmissive = 0xA7D2FF60;
 
-    // ── Public API ──────────────────────────────────────────────────────
+    // -- Public API ------------------------------------------------------
 
     /// <summary>
     /// Patch vanilla skin.shpk bytes to add ColorTable emissive support.
@@ -83,7 +83,7 @@ public static class SkinShpkPatcher
     /// <summary>Patch one PS in-place: rewrite DXBC SHEX (add s5/t10, replace emissive mul+mul
     /// with mad+mov+sample), update blob section + downstream shader offsets, add g_SamplerTable
     /// resource entries. Returns false if the PS blob is malformed or the emissive pattern
-    /// cannot be located — caller logs and continues with the remaining PSes.</summary>
+    /// cannot be located -- caller logs and continues with the remaining PSes.</summary>
     private static bool PatchSinglePs(ShpkFile shpk, int psIndex, int strOff, int strSz)
     {
         int targetIdx = shpk.VsCount + psIndex;
@@ -165,7 +165,7 @@ public static class SkinShpkPatcher
         shpk.BlobSection.InsertRange(blobStart, patchedDxbc);
         ps.BlobSz = newSize;
 
-        // Downstream shaders share the blob section — shift their offsets by delta.
+        // Downstream shaders share the blob section -- shift their offsets by delta.
         foreach (var s in shpk.Shaders)
             if (s.BlobOff > blobStart)
                 s.BlobOff += delta;
@@ -190,7 +190,7 @@ public static class SkinShpkPatcher
         return true;
     }
 
-    // ── DXBC Checksum (custom MD5 variant from vkd3d-proton) ────────────
+    // -- DXBC Checksum (custom MD5 variant from vkd3d-proton) ------------
 
     private static readonly uint[] Md5S =
     {
@@ -280,7 +280,7 @@ public static class SkinShpkPatcher
         return state;
     }
 
-    // ── DXBC Container ──────────────────────────────────────────────────
+    // -- DXBC Container --------------------------------------------------
 
     private static bool IsDxbc(byte[] data) => data.Length >= 32
         && data[0] == (byte)'D' && data[1] == (byte)'X' && data[2] == (byte)'B' && data[3] == (byte)'C';
@@ -350,7 +350,7 @@ public static class SkinShpkPatcher
         return result;
     }
 
-    // ── SHEX Patching ───────────────────────────────────────────────────
+    // -- SHEX Patching ---------------------------------------------------
 
     private static byte[]? PatchShexAddDeclarations(byte[] shexData, int samplerReg, int textureReg)
     {
@@ -510,7 +510,7 @@ public static class SkinShpkPatcher
     // `sample_indexable(texture2d)(float4) r1.xyzw, r1.xyxx, t10.xyzw, s5` (11 tokens, 44 bytes).
     // After this instruction, r1.xyz holds the per-layer emissive color and is consumed by
     // `mul r1.xyz, r1.xyzx, cb5[0].xyzx` (g_MaterialParameterDynamic.m_EmissiveColor) at the
-    // end of the shader — exactly the "emissive contribution only" vector we want to modulate.
+    // end of the shader -- exactly the "emissive contribution only" vector we want to modulate.
     private static readonly byte[] EmissiveSampleAnchor = ToLeBytes(
         0x8B000045, 0x800000C2, 0x00155543,
         0x001000F2, 0x00000001,
@@ -525,7 +525,7 @@ public static class SkinShpkPatcher
     //  - col 5 halfs 20..23 = ripple centerU, centerV, freq, dirMode
     //  - col 6 halfs 24..26 = dirX, dirY, dualActive (half 27 unused)
     // C# sets dualActive=1 when (mode==Gradient) or (mode==Ripple && RippleDual).
-    // dirMode: 0=radial, 1=linear, 2=bidirectional. Non-Ripple modes use freq=0 → spatial offset is 0.
+    // dirMode: 0=radial, 1=linear, 2=bidirectional. Non-Ripple modes use freq=0 -> spatial offset is 0.
     //
     //   -- col 3 (anim params) --
     //   mov    r9.x, l(0.4375)                       ; col 3 U
@@ -535,12 +535,12 @@ public static class SkinShpkPatcher
     //   mov    r9.z, l(0.6875)                       ; col 5 U
     //   sample r6.xyzw, r9.zyzz, t10, s5             ; r6.x=cU, .y=cV, .z=freq, .w=dirMode
     //   add    r8.xy, v2.xyxx, -r6.xyxx              ; d = uv - center
-    //   dp2    r8.z, r8.xyxx, r8.xyxx                ; d·d
+    //   dp2    r8.z, r8.xyxx, r8.xyxx                ; d.d
     //   sqrt   r8.z, r8.z                            ; distRadial
     //   -- col 6 (direction + dualActive) --
     //   mov    r9.w, l(0.8125)                       ; col 6 U
     //   sample r10.xyzw, r9.wyww, t10, s5            ; r10.x=dirX, .y=dirY, .z=dualActive
-    //   dp2    r8.w, r8.xyxx, r10.xyxx               ; distLinear = d·dir
+    //   dp2    r8.w, r8.xyxx, r10.xyxx               ; distLinear = d.dir
     //   ge     r4.x, r6.w, l(0.5)                    ; dirMode>=0.5? (linear or bidir)
     //   ge     r4.y, r6.w, l(1.5)                    ; dirMode>=1.5? (bidir)
     //   movc   r8.z, r4.x, r8.w, r8.z                ; pick linear vs radial
@@ -798,7 +798,7 @@ public static class SkinShpkPatcher
         return null;
     }
 
-    // ── SHPK Parse/Rebuild ──────────────────────────────────────────────
+    // -- SHPK Parse/Rebuild ----------------------------------------------
 
     private class ShpkResource
     {
@@ -1008,7 +1008,7 @@ public static class SkinShpkPatcher
             var ps19PassSlotCounts = new int[16];     // pass index -> count
             var ps19SubViewCounts = new int[16];      // subview index -> count
 
-            // Track distinct sceneKey/sysKey combos for matched nodes — useful for
+            // Track distinct sceneKey/sysKey combos for matched nodes -- useful for
             // inferring whether scene/sys keys partition Emissive variants further.
             var matchedSceneKeyValues = new HashSet<string>();
             var matchedSysKeyValues = new HashSet<string>();
@@ -1121,7 +1121,7 @@ public static class SkinShpkPatcher
                 foreach (var kv in sorted) pairs.Add($"{kv.Key}x{kv.Value}");
                 Log($"NodeDump: pass[{slot}] PS distribution ({dict.Count} unique): {string.Join(",", pairs)}");
             }
-            // Pure list of unique pass[2].Ps (lighting pass) — copy this into the patcher.
+            // Pure list of unique pass[2].Ps (lighting pass) -- copy this into the patcher.
             var slot2Unique = new SortedSet<uint>(perSlotPsCount[2].Keys);
             Log($"NodeDump: pass[2] LIGHTING PSes to patch ({slot2Unique.Count}): [{string.Join(",", slot2Unique)}]");
 
@@ -1259,7 +1259,7 @@ public static class SkinShpkPatcher
         return ms.ToArray();
     }
 
-    // ── Helpers ──────────────────────────────────────────────────────────
+    // -- Helpers ----------------------------------------------------------
 
     private static byte[] ToLeBytes(params uint[] values)
     {

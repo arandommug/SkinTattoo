@@ -13,7 +13,7 @@
 - 格式：`.pmp` (Penumbra mod package)
 - 每种族/性别一个 option group，每组 8 个颜色预设 + Off
 - 每个预设映射所有脸型的 `iri_a.mtrl` 到同一个修改过的 mtrl 文件
-- 映射路径示例：`chara/human/c0101/obj/face/f0001/material/mt_c0101f0001_iri_a.mtrl` → `chara/Hyur/Midlander/Male/Preset 1 - Red.mtrl`
+- 映射路径示例：`chara/human/c0101/obj/face/f0001/material/mt_c0101f0001_iri_a.mtrl` -> `chara/Hyur/Midlander/Male/Preset 1 - Red.mtrl`
 
 ### 1.2 mtrl 文件解析
 
@@ -115,16 +115,16 @@ mod 作者说明：
 > "This should work with any eyes deemed 'glow compatible' or 'glow ready'
 > (this means the eye's mask layer has the red channel, emissive, set up correctly)."
 
-- 原版眼睛的 mask 红通道可能为 0 → 无法发光
-- 许多第三方眼睛 mod 已预设好 emissive mask → 直接可用
+- 原版眼睛的 mask 红通道可能为 0 -> 无法发光
+- 许多第三方眼睛 mod 已预设好 emissive mask -> 直接可用
 - 解决方案：可以额外生成/修改 mask 纹理注入白色红通道
 
 ### 3.3 纹理引用
 
 mod 中使用的纹理路径（所有预设共享）：
-- `chara/common/texture/eye/eye11_base.tex` — 基础颜色纹理
-- `chara/common/texture/eye/eye01_norm.tex` — 法线贴图
-- `chara/common/texture/eye/eye01_mask.tex` — Mask 纹理（红通道 = emissive mask）
+- `chara/common/texture/eye/eye11_base.tex` -- 基础颜色纹理
+- `chara/common/texture/eye/eye01_norm.tex` -- 法线贴图
+- `chara/common/texture/eye/eye01_mask.tex` -- Mask 纹理（红通道 = emissive mask）
 
 ---
 
@@ -175,15 +175,15 @@ chara/human/c{raceGenderCode}/obj/face/f{faceId}/material/mt_c{code}f{faceId}_ir
 
 **改动清单：**
 
-1. **EmissiveCBufferHook.cs** — 支持多个 CRC 常量（当前只有 g_EmissiveColor）
+1. **EmissiveCBufferHook.cs** -- 支持多个 CRC 常量（当前只有 g_EmissiveColor）
    - 新增 CRC 字典：`g_IrisRingEmissiveIntensity`, `g_WhiteEyeColor` 等
    - `SetTargetByPath` 扩展为接受 `Dictionary<uint, float[]>` 参数
 
-2. **PreviewService.cs** — 新增 iris 材质查找
+2. **PreviewService.cs** -- 新增 iris 材质查找
    - 遍历 face model materials 查找 `_iri_` 路径
    - 注册到 EmissiveCBufferHook
 
-3. **UI** — Iris 发光控制面板
+3. **UI** -- Iris 发光控制面板
    - Emissive 颜色选择器 + 强度滑条
    - 可选：Limbal ring 发光控制、巩膜颜色
    - 可选：Iris 几何参数（thickness, radius）
@@ -191,21 +191,21 @@ chara/human/c{raceGenderCode}/obj/face/f{faceId}/material/mt_c{code}f{faceId}_ir
 **数据流：**
 ```
 UI: Iris 颜色/强度滑条
-  ↓
+  v
 SetIrisEmissiveTarget(charBase, color)
-  ↓ 查找 face model 的 _iri_ 材质
-  ↓ 获取 MaterialResourceHandle 指针
-  ↓
+  v 查找 face model 的 _iri_ 材质
+  v 获取 MaterialResourceHandle 指针
+  v
 EmissiveCBufferHook.SetTargetByPath(...)
-  ↓
-OnRenderMaterial detour → 匹配 MRH → LoadSourcePointer → 写入 g_EmissiveColor
-  ↓
-GPU upload → 发光效果实时生效
+  v
+OnRenderMaterial detour -> 匹配 MRH -> LoadSourcePointer -> 写入 g_EmissiveColor
+  v
+GPU upload -> 发光效果实时生效
 ```
 
 ### 方案 B：静态 mtrl 替换
 
-与 mod 做法相同，生成修改过的 `iri_a.mtrl` → Penumbra temp mod。
+与 mod 做法相同，生成修改过的 `iri_a.mtrl` -> Penumbra temp mod。
 
 - 优点：简单，证实可行
 - 缺点：需 redraw（闪烁），路径取决于种族/性别/脸型
@@ -243,7 +243,7 @@ iris.shpk 是引擎原生支持的核心 shader 之一。
 > "Emissive is now included in the eye shader for ALL eyes, but in order to activate it, you need to mask out where you want glow on the mask RED channel, AND turn the Emissive shader constant on by changing the 3 values to not 0."
 
 - Dawntrail (7.0+) 之后，**所有眼睛都内置了发光功能**，只需满足两个条件
-- Mask 红通道 ≠ 0（控制发光区域）+ g_EmissiveColor ≠ 0（控制发光颜色）
+- Mask 红通道 != 0（控制发光区域）+ g_EmissiveColor != 0（控制发光颜色）
 - 高于 0.9 的 emissive 值可能产生视觉瑕疵，建议 0.3-0.8 范围
 - 所有 pre-DT 眼睛 mod 必须通过 Loose Texture Compiler 或 TexTools Eye Saver 转换
 
@@ -266,12 +266,12 @@ iris.shpk 是引擎原生支持的核心 shader 之一。
 
 - **IRI A material** 控制左眼
 - **IRI B material** 控制右眼
-- 两只眼睛使用独立材质 → **可以独立设置不同的 g_EmissiveColor！**
+- 两只眼睛使用独立材质 -> **可以独立设置不同的 g_EmissiveColor！**
 - 这意味着异色发光瞳是可行的
 
 ### 7.4 Shader 常量 CRC 修正
 
-社区文档中 g_EmissiveColor 的 CRC 写作 `3BA64362`（可能是笔误），我们代码中使用 `38A64362` —— 后者与 Meddle/Penumbra 一致，以代码中的为准。
+社区文档中 g_EmissiveColor 的 CRC 写作 `3BA64362`（可能是笔误），我们代码中使用 `38A64362` ---- 后者与 Meddle/Penumbra 一致，以代码中的为准。
 
 ### 7.5 Atramentum Luminis (ALum) 对眼睛的扩展
 
@@ -282,7 +282,7 @@ iris.shpk 是引擎原生支持的核心 shader 之一。
 ## 八、风险与注意事项
 
 1. **Emissive mask 依赖**：Dawntrail 后所有眼睛内置了 emissive 支持，只要 mask 红通道非零即可。大部分第三方眼睛 mod 已预设好。原版眼睛的 mask 红通道可能为 0，需测试。
-2. **双眼独立控制**：IRI A / IRI B 是独立材质，CBuffer g_EmissiveColor 可以独立设置 → **双眼可以不同颜色** [x]
+2. **双眼独立控制**：IRI A / IRI B 是独立材质，CBuffer g_EmissiveColor 可以独立设置 -> **双眼可以不同颜色** [x]
 3. **与 Glamourer 兼容**：Glamourer 通过 CustomizeParameter 修改眼睛颜色（diffuse 层面），与 emissive CBuffer 修改不冲突
 4. **与 ALum 兼容**：ALum 使用 mask alpha 通道控制眼睛发光，SkinTattoo 使用 CBuffer g_EmissiveColor 控制，不同机制不冲突
 5. **Emissive 值范围**：建议 0.3-0.8，超过 0.9 可能出现视觉问题

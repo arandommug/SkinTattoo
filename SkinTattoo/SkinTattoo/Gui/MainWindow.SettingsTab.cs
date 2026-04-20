@@ -112,7 +112,7 @@ public partial class MainWindow
 
         const float labelW = 110f;
 
-        // ── Refresh ──
+        // -- Refresh --
         ImGui.TextDisabled(Strings.T("label.refresh_settings"));
         ImGui.Spacing();
 
@@ -151,7 +151,7 @@ public partial class MainWindow
         ImGui.Separator();
         ImGui.Spacing();
 
-        // ── UV wireframe ──
+        // -- UV wireframe --
         ImGui.TextDisabled(Strings.T("label.uv_wireframe"));
         ImGui.Spacing();
 
@@ -186,7 +186,7 @@ public partial class MainWindow
         ImGui.Separator();
         ImGui.Spacing();
 
-        // ── HTTP ──
+        // -- HTTP --
         ImGui.TextDisabled(Strings.T("label.http_server"));
         ImGui.Spacing();
         ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.7f, 0.7f, 0.7f, 1f));
@@ -225,7 +225,7 @@ public partial class MainWindow
         ImGui.Separator();
         ImGui.Spacing();
 
-        // ── Debug ──
+        // -- Debug --
         ImGui.TextDisabled(Strings.T("label.debug_section"));
         ImGui.Spacing();
 
@@ -239,7 +239,7 @@ public partial class MainWindow
         ImGui.Separator();
         ImGui.Spacing();
 
-        // ── About / links ──
+        // -- About / links --
         ImGui.TextDisabled(Strings.T("label.about"));
         ImGui.Spacing();
 

@@ -39,11 +39,11 @@ chara/human/c1401/obj/body/b0001/model/c1401b0001.mdl      [SqPack (no)]
 chara/human/c1401/obj/body/b0001/model/c1401b0001_etc.mdl  [SqPack (no)]
 ```
 
-Based on `IDataManager.FileExists`. **FFXIV does not have a "vanilla naked body mdl" at all** — the b0001 slot is merely a mtrl naming convention with no corresponding mdl file.
+Based on `IDataManager.FileExists`. **FFXIV does not have a "vanilla naked body mdl" at all** -- the b0001 slot is merely a mtrl naming convention with no corresponding mdl file.
 
 > [!] To confirm: do a direct Meddle SqPack probe as final verification (IDataManager is occasionally inaccurate).
 
-**Conclusion**: The original plan of "derive from tex path → load vanilla `c1401b0001_top.mdl`" is completely dead.
+**Conclusion**: The original plan of "derive from tex path -> load vanilla `c1401b0001_top.mdl`" is completely dead.
 
 ### 2.2 tail's mtrl/tex/mdl Suffixes Are Inconsistent With Each Other
 
@@ -53,7 +53,7 @@ Based on `IDataManager.FileExists`. **FFXIV does not have a "vanilla naked body 
 | tex | `c1401t0004_etc_base.tex` | `_etc` |
 | mdl | `c1401t0004_til.mdl` | `_til` |
 
-The previous `TexPathParser` was using `_etc` from the tex name to construct `c1401t0004_etc.mdl` as the mdl suffix — this is wrong.
+The previous `TexPathParser` was using `_etc` from the tex name to construct `c1401t0004_etc.mdl` as the mdl suffix -- this is wrong.
 
 **Correct rule**: The mdl suffix is determined solely by the **slot type**, and has nothing to do with the `_xxx` segment in the tex name.
 Correspondence (reference: Penumbra `CustomizationType.ToSuffix()`):
@@ -62,7 +62,7 @@ Correspondence (reference: Penumbra `CustomizationType.ToSuffix()`):
 |---|---|
 | body | `_top` |
 | face | `_fac` |
-| iris | _(same face mdl, see §2.3)_ |
+| iris | _(same face mdl, see Sec.2.3)_ |
 | hair | `_hir` |
 | tail | `_til` |
 | ear (zear) | `_zer` |
@@ -73,16 +73,16 @@ The raw resource tree dump shows:
 
 ```
 chara/human/c1401/obj/face/f0001/model/c1401f0001_fac.mdl
-  ├── mt_c1401f0001_fac_a.mtrl    (face skin)
-  ├── mt_c1401f0001_fac_b.mtrl    (face skin)
-  ├── mt_c1401f0001_fac_c.mtrl    (face skin)
-  ├── mt_c1401f0001_iri_a.mtrl    (eyeball!!!  ← same mdl)
-  ├── mt_c1401f0001_etc_a.mtrl    (eyelashes/mouth/...)
-  ├── mt_c1401f0001_etc_b.mtrl
-  └── mt_c1401f0001_etc_c.mtrl
+  +-- mt_c1401f0001_fac_a.mtrl    (face skin)
+  +-- mt_c1401f0001_fac_b.mtrl    (face skin)
+  +-- mt_c1401f0001_fac_c.mtrl    (face skin)
+  +-- mt_c1401f0001_iri_a.mtrl    (eyeball!!!  <- same mdl)
+  +-- mt_c1401f0001_etc_a.mtrl    (eyelashes/mouth/...)
+  +-- mt_c1401f0001_etc_b.mtrl
+  +-- mt_c1401f0001_etc_c.mtrl
 ```
 
-The face mdl contains 7 material slots at once; the eyeball's UV is a mesh subset corresponding to a certain matIdx in the face mdl — **no separate `_iri.mdl` file is needed**.
+The face mdl contains 7 material slots at once; the eyeball's UV is a mesh subset corresponding to a certain matIdx in the face mdl -- **no separate `_iri.mdl` file is needed**.
 
 The UV editor canvas for iris textures (including the shared `chara/common/texture/eye/eye10_base.tex`) should use `c1401f0001_fac.mdl` + filter for matIdx == the slot that uses the iri material.
 
@@ -92,24 +92,24 @@ In scenario 1 (naked, no mod), 7 mdls reference `mt_c1401b0001_a.mtrl`:
 
 ```
 4 smallclothes pieces:
-  chara/equipment/e0000/model/c0201e0000_top.mdl  ← visible chest/shoulder/arm skin
-  chara/equipment/e0000/model/c0201e0000_glv.mdl  ← wrist/back of hand
-  chara/equipment/e0000/model/c0201e0000_dwn.mdl  ← thighs/shins
-  chara/equipment/e0000/model/c0201e0000_sho.mdl  ← ankles
+  chara/equipment/e0000/model/c0201e0000_top.mdl  <- visible chest/shoulder/arm skin
+  chara/equipment/e0000/model/c0201e0000_glv.mdl  <- wrist/back of hand
+  chara/equipment/e0000/model/c0201e0000_dwn.mdl  <- thighs/shins
+  chara/equipment/e0000/model/c0201e0000_sho.mdl  <- ankles
 
 3 cross-race shared "undergarment cutout" chunks:
-  chara/human/c0201/obj/body/b0005/model/c0201b0005_top.mdl  ← Hyur F b5
-  chara/human/c1401/obj/body/b0002/model/c1401b0002_top.mdl  ← Aura F b2
-  chara/human/c0801/obj/body/b0003/model/c0801b0003_top.mdl  ← Lala F b3
+  chara/human/c0201/obj/body/b0005/model/c0201b0005_top.mdl  <- Hyur F b5
+  chara/human/c1401/obj/body/b0002/model/c1401b0002_top.mdl  <- Aura F b2
+  chara/human/c0801/obj/body/b0003/model/c0801b0003_top.mdl  <- Lala F b3
 ```
 
-These 7 mdls each contribute a portion of the body, and **all of them together constitute the complete body skin UV coverage**. This explains the user's observation that "the chest and crotch areas have underwear, so those parts are separately cut out" — the game uses mtrl sharing + multi-mdl assembly to represent the concept of "skin"; there is no single "body mdl".
+These 7 mdls each contribute a portion of the body, and **all of them together constitute the complete body skin UV coverage**. This explains the user's observation that "the chest and crotch areas have underwear, so those parts are separately cut out" -- the game uses mtrl sharing + multi-mdl assembly to represent the concept of "skin"; there is no single "body mdl".
 
 **When wearing equipment** (scenarios 2 / 4), the 4 smallclothes pieces are replaced with actual equipment mdls (e.g. `c1401e6085_met.mdl`, `c0201e6108_top.mdl`), but they still reference the same `mt_c1401b0001_a.mtrl`, because equipment models also need to sample body skin to draw the skin exposed at necklines/sleeves/pant legs. The 3 c0201b0005 / c1401b0002 / c0801b0003 entries are always in the tree, unaffected by equipment.
 
 ### 2.5 mtrl game path Is the Only Stable Anchor
 
-4 scenarios × 4 textures = 16 combinations, and the **mtrl game path is 100% vanilla** in every case:
+4 scenarios * 4 textures = 16 combinations, and the **mtrl game path is 100% vanilla** in every case:
 
 ```
 mt_c1401b0001_a.mtrl       (body)
@@ -118,30 +118,30 @@ mt_c1401f0001_iri_a.mtrl   (iris)
 mt_c1401t0004_a.mtrl       (tail)
 ```
 
-Even mods like Eve that rewrite the mtrl to a path like `D:\FF14Mod\Eve\vanilla materials\raen_a.mtrl` still have a **vanilla game path** — the mod replaces the mtrl file itself, not the path.
+Even mods like Eve that rewrite the mtrl to a path like `D:\FF14Mod\Eve\vanilla materials\raen_a.mtrl` still have a **vanilla game path** -- the mod replaces the mtrl file itself, not the path.
 
 Contrast with tex game path:
 - Without mod: `chara/human/c1401/obj/body/b0001/texture/c1401b0001_base.tex`
-- With Eve mod: `chara/nyaughty/eve/vanilla_raen_base.tex` ← **entirely mod-custom path**
+- With Eve mod: `chara/nyaughty/eve/vanilla_raen_base.tex` <- **entirely mod-custom path**
 
-→ The anchor for resolution must be the mtrl game path; the tex game path **cannot** be used.
+-> The anchor for resolution must be the mtrl game path; the tex game path **cannot** be used.
 
 ### 2.6 Eve Mod = "Smallclothes-Slot Redirect" Body Replacement
 
 Scenario 3 makes this very clear:
 
 ```
-chara/equipment/e0000/model/c0201e0000_top.mdl → D:\FF14Mod\Eve\models - body\body - milky.mdl
-chara/equipment/e0000/model/c0201e0000_glv.mdl → D:\FF14Mod\Eve\models - hands\hands - natural.mdl
-chara/equipment/e0000/model/c0201e0000_dwn.mdl → D:\FF14Mod\Eve\models - legs\legs - default.mdl
-chara/equipment/e0000/model/c0201e0000_sho.mdl → D:\FF14Mod\Eve\models - feet\feet - natural.mdl
+chara/equipment/e0000/model/c0201e0000_top.mdl -> D:\FF14Mod\Eve\models - body\body - milky.mdl
+chara/equipment/e0000/model/c0201e0000_glv.mdl -> D:\FF14Mod\Eve\models - hands\hands - natural.mdl
+chara/equipment/e0000/model/c0201e0000_dwn.mdl -> D:\FF14Mod\Eve\models - legs\legs - default.mdl
+chara/equipment/e0000/model/c0201e0000_sho.mdl -> D:\FF14Mod\Eve\models - feet\feet - natural.mdl
 ```
 
-Eve **does not redirect the vanilla body mdl path** (because that mdl doesn't exist at all, see §2.1); it replaces the mesh of the 4 smallclothes slots with "individual parts of a full nude body". When the player is wearing only smallclothes (no other equipment), these 4 mod mdls render as Eve's complete nude body.
+Eve **does not redirect the vanilla body mdl path** (because that mdl doesn't exist at all, see Sec.2.1); it replaces the mesh of the 4 smallclothes slots with "individual parts of a full nude body". When the player is wearing only smallclothes (no other equipment), these 4 mod mdls render as Eve's complete nude body.
 
-→ Any "load mdl as UV canvas" logic must go through **Penumbra's resolved `mdl_node.ActualPath`** in order to get the mod-replaced mesh. Using vanilla paths directly would give the wrong UV (though mods like Eve that use vanilla-compatible UV might still look fine, mods like bibo that change the UV would break).
+-> Any "load mdl as UV canvas" logic must go through **Penumbra's resolved `mdl_node.ActualPath`** in order to get the mod-replaced mesh. Using vanilla paths directly would give the wrong UV (though mods like Eve that use vanilla-compatible UV might still look fine, mods like bibo that change the UV would break).
 
-### 2.7 ⭐ Key Finding: The Game Engine Forces skin mtrl's `bXXXX` to `b0001` at Runtime
+### 2.7 * Key Finding: The Game Engine Forces skin mtrl's `bXXXX` to `b0001` at Runtime
 
 Source: FFXIV_TexTools_UI's `Views/FileControls/ModelFileControl.xaml.cs:455-496` (`AdjustSkinMaterial`). TexTools comments state directly:
 
@@ -155,20 +155,20 @@ Source: FFXIV_TexTools_UI's `Views/FileControls/ModelFileControl.xaml.cs:455-496
 
 ```
 Mdl chara/human/c1401/obj/body/b0002/model/c1401b0002_top.mdl
-  └─ Mtrl chara/human/c1401/obj/body/b0001/material/v0001/mt_c1401b0001_a.mtrl
-                                          ↑↑↑↑↑
+  +- Mtrl chara/human/c1401/obj/body/b0001/material/v0001/mt_c1401b0001_a.mtrl
+                                          ^^^^^
                                        This segment was rewritten from b0002 to b0001 by the engine
 ```
 
-This explains why "7 completely unrelated mdls all reference the same mtrl" — each originally referenced a different body slot, but the engine normalized them all to `b0001`, so in the tree they appear to share the same mtrl. **They do not actually share the same UV mesh**.
+This explains why "7 completely unrelated mdls all reference the same mtrl" -- each originally referenced a different body slot, but the engine normalized them all to `b0001`, so in the tree they appear to share the same mtrl. **They do not actually share the same UV mesh**.
 
-### 2.8 ⭐ Key Finding: Each Race Has Exactly One Canonical Body mdl
+### 2.8 * Key Finding: Each Race Has Exactly One Canonical Body mdl
 
 Source: VFXEditor-CN's `VFXEditor/Files/common_racial` (complete vanilla asset list). For c1401 (Au Ra Female), only **one** body mdl is listed:
 
 ```
 $ grep "c1401" common_racial | grep "/body/" | grep ".mdl$"
-chara/human/c1401/obj/body/b0002/model/c1401b0002_top.mdl    ← the only one
+chara/human/c1401/obj/body/b0002/model/c1401b0002_top.mdl    <- the only one
 ```
 
 All other entries are just mtrl files, no mdl.
@@ -177,9 +177,9 @@ All other entries are just mtrl files, no mdl.
 
 The previously seen `c0201b0005_top.mdl` / `c0801b0003_top.mdl` are body mdls of other races (Hyur F b5, possibly Lala F b3). They appear in the player's tree because they reference the same skin mtrl that was rewritten to `b0001`, but they are **not the c1401 player's body**.
 
-> Hyur Midlander Male (c0101) has 5 body slots in the list: b0001 (4 pieces: top/glv/dwn/sho) + one _top each for b0002/b0003/b0005/b0006. b0001 is the piecewise "naked smallclothes-style" body used for NPCs and similar characters without equipment; b0002+ are the full-body mdls used by normal adult characters. Different races / genders have different canonical body slot ids (aura f is b0002, hyur m is b0001 4-piece, etc.) — this needs to be data-driven rather than hardcoded guessing.
+> Hyur Midlander Male (c0101) has 5 body slots in the list: b0001 (4 pieces: top/glv/dwn/sho) + one _top each for b0002/b0003/b0005/b0006. b0001 is the piecewise "naked smallclothes-style" body used for NPCs and similar characters without equipment; b0002+ are the full-body mdls used by normal adult characters. Different races / genders have different canonical body slot ids (aura f is b0002, hyur m is b0001 4-piece, etc.) -- this needs to be data-driven rather than hardcoded guessing.
 
-### 2.9 Preliminary Synthesis of §2.7 + §2.8
+### 2.9 Preliminary Synthesis of Sec.2.7 + Sec.2.8
 
 Combining the two findings:
 
@@ -189,9 +189,9 @@ Combining the two findings:
 | `c1401b0001_top.mdl` not found | b0001 simply doesn't exist for c1401 |
 | Which mdl is "the c1401 player's body"? | Appears to be the single answer after filtering by race + body path pattern: `c1401b0002_top.mdl` |
 
-But **this conclusion was later disproved by actual testing** — see §2.10.
+But **this conclusion was later disproved by actual testing** -- see Sec.2.10.
 
-### 2.10 ⭐ Testing Correction: `c1401b0002_top.mdl` Is a 24-Vertex Stub, **Not the Body**
+### 2.10 * Testing Correction: `c1401b0002_top.mdl` Is a 24-Vertex Stub, **Not the Body**
 
 After ReadMaterialFileNames + Meddle ExtractMesh, actually loading `c1401b0002_top.mdl` gives:
 
@@ -200,17 +200,17 @@ After ReadMaterialFileNames + Meddle ExtractMesh, actually loading `c1401b0002_t
 [MeshExtractor] Done: 24 verts, 20 tris
 ```
 
-VFXEditor's `common_racial` lists it as c1401's body mdl, but it has **only 24 vertices** — not enough to render even a single hand. This tells us:
+VFXEditor's `common_racial` lists it as c1401's body mdl, but it has **only 24 vertices** -- not enough to render even a single hand. This tells us:
 
 > **The mdls under `chara/human/cXXXX/obj/body/...` paths are racial deformer / cross-race geometry stub meshes used internally by the engine (typically 24~400 vertex micro-patches), not visible rendered bodies**.
 
 So where is the actual body geometry? **It's all in the equipment slot mdls**:
 
 ```
-chara/equipment/e0000/model/c0201e0000_top.mdl   ← upper body mesh (torso + chest + arms)
-chara/equipment/e0000/model/c0201e0000_glv.mdl   ← hands
-chara/equipment/e0000/model/c0201e0000_dwn.mdl   ← legs
-chara/equipment/e0000/model/c0201e0000_sho.mdl   ← feet
+chara/equipment/e0000/model/c0201e0000_top.mdl   <- upper body mesh (torso + chest + arms)
+chara/equipment/e0000/model/c0201e0000_glv.mdl   <- hands
+chara/equipment/e0000/model/c0201e0000_dwn.mdl   <- legs
+chara/equipment/e0000/model/c0201e0000_sho.mdl   <- feet
 ```
 
 These 4 are the equipment mdls for **e0000 = "smallclothes (naked base)"**. FFXIV's character rendering pipeline always dresses the body slot as equipment (even e0000 underwear is equipment). These 4 mdls are deformed into the appropriate body shape for the wearer's race via the **racial deformer** system, so the same c0201e0000 mesh can serve all races.
@@ -219,26 +219,26 @@ These 4 are the equipment mdls for **e0000 = "smallclothes (naked base)"**. FFXI
 
 **Summary**: Body geometry = mdls under the `chara/equipment/...` path. **Any mdl under a `chara/human/.../body/...` path should be filtered out**, regardless of race match.
 
-### 2.11 ⭐ face mdl Material Slots Share the Same Set of Textures
+### 2.11 * face mdl Material Slots Share the Same Set of Textures
 
 The face mdl `c1401f0001_fac.mdl` has 7 material slots. The resource tree confirms that all three fac_a/b/c mtrls **reference the same set** of `c1401f0001_fac_base.tex` / `_fac_norm.tex` / `_fac_mask.tex`:
 
 ```
-- Mtrl mt_c1401f0001_fac_a.mtrl     ┐
-  - Tex c1401f0001_fac_base.tex     │
-  - Tex c1401f0001_fac_norm.tex     │
-  - Tex c1401f0001_fac_mask.tex     │
-- Mtrl mt_c1401f0001_fac_b.mtrl     │
-  - Tex c1401f0001_fac_base.tex     ├ all share the same fac textures
-  - ...                             │
-- Mtrl mt_c1401f0001_fac_c.mtrl     │
-  - Tex c1401f0001_fac_base.tex     │
-  - ...                             ┘
+- Mtrl mt_c1401f0001_fac_a.mtrl     +
+  - Tex c1401f0001_fac_base.tex     |
+  - Tex c1401f0001_fac_norm.tex     |
+  - Tex c1401f0001_fac_mask.tex     |
+- Mtrl mt_c1401f0001_fac_b.mtrl     |
+  - Tex c1401f0001_fac_base.tex     + all share the same fac textures
+  - ...                             |
+- Mtrl mt_c1401f0001_fac_c.mtrl     |
+  - Tex c1401f0001_fac_base.tex     |
+  - ...                             +
 ```
 
-This means: a decal painted on `fac_base.tex` will simultaneously affect all mesh groups corresponding to the fac_a/b/c material slots. **Au Ra's horns/scales are in the fac_b slot** — if matIdx filtering only takes fac_a, the horns will be missed.
+This means: a decal painted on `fac_base.tex` will simultaneously affect all mesh groups corresponding to the fac_a/b/c material slots. **Au Ra's horns/scales are in the fac_b slot** -- if matIdx filtering only takes fac_a, the horns will be missed.
 
-→ face must match matIdx by **role suffix**: when target = `_fac_a`, hit all slots whose internal name has role `fac` (i.e. fac_a + fac_b + fac_c), not just the one with the exact same name.
+-> face must match matIdx by **role suffix**: when target = `_fac_a`, hit all slots whose internal name has role `fac` (i.e. fac_a + fac_b + fac_c), not just the one with the exact same name.
 
 iris (`_iri_a`) and etc (`_etc_*`) each have their own role and don't interfere: painting iris only hits `iri_*` slots and won't paint onto the face.
 
@@ -247,14 +247,14 @@ iris (`_iri_a`) and etc (`_etc_*`) each have their own role and don't interfere:
 Per-slot UV bounds measured (3 stub mdls parsed from vanilla `_a.mtrl`):
 
 ```
-c0201b0005_top.mdl: X=[1.034, 1.971] Y=[0.017, 0.984]   ← UV tile 1 (X∈[1,2])
-c1401b0002_top.mdl: X=[1.245, 1.511] Y=[0.008, 0.049]   ← UV tile 1
-c0801b0003_top.mdl: X=[0.439, 0.846] Y=[0.050, 0.950]   ← UV tile 0 (X∈[0,1])
+c0201b0005_top.mdl: X=[1.034, 1.971] Y=[0.017, 0.984]   <- UV tile 1 (X in [1,2])
+c1401b0002_top.mdl: X=[1.245, 1.511] Y=[0.008, 0.049]   <- UV tile 1
+c0801b0003_top.mdl: X=[0.439, 0.846] Y=[0.050, 0.950]   <- UV tile 0 (X in [0,1])
 ```
 
-c0801b0003 (Miqo'te F stub)'s UV is in tile 0, a different tile from the other stubs. The canvas previously used a "global `floor(min(UV))`" to normalize the tile base (to accommodate body models' UV X∈[1,2] tile 1 convention). But when merging multi-mdl results that span tiles, **cross-tile merging breaks** — after taking the floor of the minimum, only one tile's vertices fall within the canvas texture region; the other tile's vertices are pushed outside.
+c0801b0003 (Miqo'te F stub)'s UV is in tile 0, a different tile from the other stubs. The canvas previously used a "global `floor(min(UV))`" to normalize the tile base (to accommodate body models' UV X in [1,2] tile 1 convention). But when merging multi-mdl results that span tiles, **cross-tile merging breaks** -- after taking the floor of the minimum, only one tile's vertices fall within the canvas texture region; the other tile's vertices are pushed outside.
 
-→ Fix the canvas to use **per-vertex `fract()`** (`uv - floor(uv)`), which correctly handles UDIM tiles: two vertices in different tiles but at the same texel will map to the same canvas position — this is standard UDIM semantics.
+-> Fix the canvas to use **per-vertex `fract()`** (`uv - floor(uv)`), which correctly handles UDIM tiles: two vertices in different tiles but at the same texel will map to the same canvas position -- this is standard UDIM semantics.
 
 ## 3. Final Algorithm (v3)
 
@@ -287,18 +287,18 @@ Input:
    all matIdx values that match the target:
 
    - body / tail (target has no role suffix):
-       Strict normalized name match (c\d{4} → c????, b\d{4} → b???? then compare)
-       e.g.: target mt_c1401b0001_a.mtrl → mt_c????b????_a.mtrl
-             internal /mt_c0201b0001_a.mtrl → mt_c????b????_a.mtrl  (ok)
+       Strict normalized name match (c\d{4} -> c????, b\d{4} -> b???? then compare)
+       e.g.: target mt_c1401b0001_a.mtrl -> mt_c????b????_a.mtrl
+             internal /mt_c0201b0001_a.mtrl -> mt_c????b????_a.mtrl  (ok)
 
    - face / hair (target has role suffix):
        Role-based match: extract the role suffix from the internal name, compare with
        the target's role suffix.
-       e.g.: target mt_c1401f0001_fac_a.mtrl → role "fac"
-             internal /mt_c1401f0001_fac_a.mtrl → role "fac"  (ok)
-             internal /mt_c1401f0001_fac_b.mtrl → role "fac"  (ok)  (Au Ra horns)
-             internal /mt_c1401f0001_fac_c.mtrl → role "fac"  (ok)
-             internal /mt_c1401f0001_iri_a.mtrl → role "iri"  (no)
+       e.g.: target mt_c1401f0001_fac_a.mtrl -> role "fac"
+             internal /mt_c1401f0001_fac_a.mtrl -> role "fac"  (ok)
+             internal /mt_c1401f0001_fac_b.mtrl -> role "fac"  (ok)  (Au Ra horns)
+             internal /mt_c1401f0001_fac_c.mtrl -> role "fac"  (ok)
+             internal /mt_c1401f0001_iri_a.mtrl -> role "iri"  (no)
 
 5. Output List<MeshSlot>, each MeshSlot = (mdl_game_path, mdl_disk_path, matIdx[]).
 
@@ -313,9 +313,9 @@ Input:
 | body `_a` (vanilla state) | 4 equipment + 0 stubs = **4 slots** | 4 smallclothes mdls each at matIdx [0], forming complete body |
 | body `_b` (Eve mod state) | 4 equipment (Eve redirected to mod files) = **4 slots** | mod mdl's matIdx [0] is the gen3 skin slot |
 | body `_a` (Eve mod state) | 4 equipment have no `_a` reference = **0 from filter, fallback to stub = 1 slot** | After Eve rewrites, mat slots only have `_b`/`_eve-piercing`; vanilla `_a` is non-visible material in mod state |
-| face skin `_fac_a` | 1 mdl × **3 matIdx [0,1,2]** | fac_a + fac_c + fac_b (including Au Ra horns) |
-| iris `_iri_a` | 1 mdl × **1 matIdx [3]** | only iri_a, no cross-contamination |
-| tail `_a` | 1 mdl `c1401t0004_til.mdl` × matIdx [0] | tail mtrl/tex/mdl suffix inconsistency is irrelevant |
+| face skin `_fac_a` | 1 mdl * **3 matIdx [0,1,2]** | fac_a + fac_c + fac_b (including Au Ra horns) |
+| iris `_iri_a` | 1 mdl * **1 matIdx [3]** | only iri_a, no cross-contamination |
+| tail `_a` | 1 mdl `c1401t0004_til.mdl` * matIdx [0] | tail mtrl/tex/mdl suffix inconsistency is irrelevant |
 
 ### Key Properties
 
@@ -326,7 +326,7 @@ Input:
 
 ## 4. UV Canvas Rendering: Per-Vertex fract Instead of Global floor
 
-`MainWindow.Canvas.cs`'s wireframe rendering originally took a single `uvBase = floor(min(UV))` for the entire mesh to normalize (to accommodate body model UV X∈[1,2] tile 1 convention). But after merging multiple mdls, **vertices from different mdls may come from different tiles** (see §2.12); global floor pushes some vertices outside the canvas.
+`MainWindow.Canvas.cs`'s wireframe rendering originally took a single `uvBase = floor(min(UV))` for the entire mesh to normalize (to accommodate body model UV X in [1,2] tile 1 convention). But after merging multiple mdls, **vertices from different mdls may come from different tiles** (see Sec.2.12); global floor pushes some vertices outside the canvas.
 
 Fix: **per-vertex `fract()`**:
 
@@ -338,7 +338,7 @@ Vector2 ToScreen(Vector2 uv)
 }
 ```
 
-`(1.6, 0.5)` and `(0.6, 0.5)` both map to the same pixel on the canvas — this is the standard UDIM convention: two vertices in different tiles pointing to the same texel.
+`(1.6, 0.5)` and `(0.6, 0.5)` both map to the same pixel on the canvas -- this is the standard UDIM convention: two vertices in different tiles pointing to the same texel.
 
 ## 5. Load Chain: All Mesh Load Entry Points Go Through PreviewService.LoadMeshForGroup
 
@@ -377,20 +377,20 @@ All 3 callsites go through it; the new resolver path can no longer be silently o
 
 The new algorithm no longer needs "derive mdl from path". `TexPathParser` retains only:
 
-1. `ParseFromMtrl(mtrlGamePath)` — parses race / slot / slotId / role suffix
-2. `ParseFromTex(texGamePath)` — used for UI display (unreliable; may fail in mod state)
-3. `ParseBest(tex, mtrl)` — prefer mtrl, fall back to tex
+1. `ParseFromMtrl(mtrlGamePath)` -- parses race / slot / slotId / role suffix
+2. `ParseFromTex(texGamePath)` -- used for UI display (unreliable; may fail in mod state)
+3. `ParseBest(tex, mtrl)` -- prefer mtrl, fall back to tex
 
-**Removed**: the previous `CandidateModelTypes` fallback list (hardcoded candidates for guessing body→[top, "", etc], tail→[etc, til], etc.). The slot→suffix correspondence is now hardcoded in `SkinMeshResolver.BuildCanonicalMdlPattern` (face→fac, tail→til, hair→hir).
+**Removed**: the previous `CandidateModelTypes` fallback list (hardcoded candidates for guessing body->[top, "", etc], tail->[etc, til], etc.). The slot->suffix correspondence is now hardcoded in `SkinMeshResolver.BuildCanonicalMdlPattern` (face->fac, tail->til, hair->hir).
 
 ## 7. Reference Code Sources
 
-- **TexTools runtime rewrite rule** (§2.7):
+- **TexTools runtime rewrite rule** (Sec.2.7):
   `FFXIV_TexTools_UI/FFXIV_TexTools/Views/FileControls/ModelFileControl.xaml.cs:455-496`
   `AdjustSkinMaterial()` method, with authoritative comments
-- **TexTools `XivRaceTree.GetSkinRace`** — race → skin race projection
+- **TexTools `XivRaceTree.GetSkinRace`** -- race -> skin race projection
   (`xivModdingFramework`, submodule not locally checked out)
-- **VFXEditor canonical body list** (§2.8):
+- **VFXEditor canonical body list** (Sec.2.8):
   `VFXEditor-CN/VFXEditor/Files/common_racial`
   Parsing code: `VFXEditor/Select/Data/RacialData.cs:37-49`
 - **Meddle skipping b0003_top**:

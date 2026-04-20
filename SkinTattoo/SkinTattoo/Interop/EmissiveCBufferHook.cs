@@ -448,12 +448,12 @@ public unsafe class EmissiveCBufferHook : IDisposable
         float s = (float)Math.Sin(t * data.AnimSpeed * 2.0 * Math.PI);
         if (data.AnimMode == EmissiveAnimMode.Gradient)
         {
-            // mix ∈ [0.5-0.5*amp, 0.5+0.5*amp] — amp controls how far we swing between colors
+            // mix  in  [0.5-0.5*amp, 0.5+0.5*amp] -- amp controls how far we swing between colors
             float mix = MathF.Max(0f, MathF.Min(1f, 0.5f + 0.5f * data.AnimAmplitude * s));
             return Vector3.Lerp(data.BaseColor, data.GradientColorB, mix);
         }
         // Ripple has no per-pixel UV available via the CBuffer hook (iris path), so it
-        // gracefully degrades to Pulse — the user still sees time-driven modulation.
+        // gracefully degrades to Pulse -- the user still sees time-driven modulation.
         float wave = data.AnimMode == EmissiveAnimMode.Flicker
             ? (s >= 0f ? 1f : -1f)
             : s;

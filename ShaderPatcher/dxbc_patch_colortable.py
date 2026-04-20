@@ -13,7 +13,7 @@ import os
 import sys
 import copy
 
-# ── DXBC checksum via wine algorithm ──
+# -- DXBC checksum via wine algorithm --
 
 def dxbc_checksum(blob: bytes) -> tuple:
     """Compute DXBC 128-bit checksum.
@@ -123,7 +123,7 @@ def d3d_validate(dxbc_bytes: bytes) -> bool:
         return False
 
 
-# ── SHEX instruction building ──
+# -- SHEX instruction building --
 
 def encode_u32(vals):
     """Encode list of uint32 values to bytes."""
@@ -170,8 +170,8 @@ def build_colortable_sample_instructions() -> bytes:
     With:
       // r0.z = normal.alpha (row index, 0.0-1.0)
       // Convert to ColorTable UV:
-      //   y = (r0.z * 31.0 + 0.5) / 32.0  → row center
-      //   x = (2.0 + 0.5) / 8.0 = 0.3125  → emissive column center
+      //   y = (r0.z * 31.0 + 0.5) / 32.0  -> row center
+      //   x = (2.0 + 0.5) / 8.0 = 0.3125  -> emissive column center
       mad r1.x, r0.z, l(31.0), l(0.5)                    // 9 tokens
       mul r1.y, r1.x, l(0.03125)                          // 7 tokens
       mov r1.x, l(0.3125)                                 // 5 tokens
@@ -179,13 +179,13 @@ def build_colortable_sample_instructions() -> bytes:
     Total: 32 tokens = 128 bytes (net +16 tokens = +64 bytes)
 
     Actually, let's try to keep it within the original 16 tokens budget by being clever:
-      mov r1.xy, l(0.3125, <rowUV>, 0, 0)    → can't, row is dynamic
+      mov r1.xy, l(0.3125, <rowUV>, 0, 0)    -> can't, row is dynamic
 
     Better approach - use fewer instructions:
       mad r1.y, r0.z, l(0.96875), l(0.015625)  // rowUV  (7 tokens)
       // 0.96875 = 31/32, 0.015625 = 0.5/32
       sample_indexable(texture2d) r1.xyzw, l(0.3125, r1.y), t10, s5
-      → can't mix immediate and register in sample src
+      -> can't mix immediate and register in sample src
 
     Most compact viable approach:
       mad r1.x, r0.z, l(0.96875), l(0.015625)            // 9 tokens: r1.x = rowUV
@@ -229,7 +229,7 @@ def build_colortable_sample_instructions() -> bytes:
     return encode_u32([nop_token] * 16)
 
 
-# ── DXBC patching ──
+# -- DXBC patching --
 
 def patch_shex_add_declarations(shex_data: bytearray,
                                  new_sampler_reg: int,
@@ -331,17 +331,17 @@ def patch_shex_replace_emissive(shex_data: bytearray) -> bytearray:
     # zero out the emissive color (set r1.xyz = 0) to verify the patch works,
     # then refine with actual ColorTable sampling.
 
-    # ColorTable sampling replacement (25 tokens, original was 16 → net +9 tokens = +36 bytes)
+    # ColorTable sampling replacement (25 tokens, original was 16 -> net +9 tokens = +36 bytes)
     #
     # r0.z = normal.alpha (row pair index, 0.0 = pair 0, 1.0 = pair 15)
-    # ColorTable texture (t10): 8-wide × 32-tall, R16G16B16A16_FLOAT
+    # ColorTable texture (t10): 8-wide * 32-tall, R16G16B16A16_FLOAT
     # Emissive is at column 2 (vec4 index 2): u = (2 + 0.5) / 8 = 0.3125
     # Row UV: v = (rowPair * 2 + 0.5) / 32 = rowPair * 0.0625 + 0.015625
     #   But rowPair = r0.z * 15, so v = r0.z * 15 * 0.0625 + 0.015625 = r0.z * 0.9375 + 0.015625
     #
-    # Instruction 1: mad r1.y, r0.z, l(0.9375), l(0.015625)    — 9 tokens
-    # Instruction 2: mov r1.x, l(0.3125)                        — 5 tokens
-    # Instruction 3: sample t10, r1.xy, s5 → r1.xyzw            — 11 tokens
+    # Instruction 1: mad r1.y, r0.z, l(0.9375), l(0.015625)    -- 9 tokens
+    # Instruction 2: mov r1.x, l(0.3125)                        -- 5 tokens
+    # Instruction 3: sample t10, r1.xy, s5 -> r1.xyzw            -- 11 tokens
     # Total: 25 tokens
     #
     # Output: r1.xyz = emissive RGB from ColorTable (same register as original)
@@ -445,7 +445,7 @@ def rebuild_dxbc(original: bytes, new_shex_data: bytes) -> bytearray:
     return result
 
 
-# ── Main ──
+# -- Main --
 
 def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))

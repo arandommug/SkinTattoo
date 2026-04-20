@@ -17,7 +17,7 @@ public partial class MainWindow
     // Cleared on manual target change or a fresh auto-detect on a different layer.
     private int autoNormalNoticeForIndex = -1;
 
-    // ── Right Panel: Parameters ──────────────────────────────────────────────
+    // -- Right Panel: Parameters ----------------------------------------------
 
     private void DrawParameterPanel()
     {
@@ -46,7 +46,7 @@ public partial class MainWindow
 
         ImGui.Spacing();
 
-        // ── Image section ──
+        // -- Image section --
         DrawImageSection(group, layer, idx);
 
         var hasImage = !string.IsNullOrEmpty(layer.ImagePath);
@@ -483,7 +483,7 @@ public partial class MainWindow
                             ImGui.TextDisabled(Strings.T("label.angle")); ImGui.SameLine();
                             ImGui.SetNextItemWidth(-1);
                             var ang = layer.AnimDirAngle;
-                            if (ImGui.DragFloat("##animDirAngle", ref ang, 1f, -180f, 180f, "%.0f°"))
+                            if (ImGui.DragFloat("##animDirAngle", ref ang, 1f, -180f, 180f, "%.0fdeg"))
                             { layer.AnimDirAngle = ang; MarkPreviewDirty(); TryDirectEmissiveUpdate(group); }
                         }
 
@@ -503,7 +503,7 @@ public partial class MainWindow
             }
         }
 
-        // ── Layer fade mask ──
+        // -- Layer fade mask --
         ImGui.Spacing();
         DrawSectionLabel(Strings.T("section.fade"));
 

@@ -87,32 +87,32 @@ docs/                                 # Technical documentation
 
 The plugin serves a REST API at `http://localhost:12580/` after startup:
 
-- `GET /api/status` — Plugin status
-- `GET /api/project` — Current project JSON
-- `POST /api/layer` — Add layer
-- `PUT /api/layer/{id}` — Modify layer params
-- `DELETE /api/layer/{id}` — Delete layer
-- `POST /api/preview` — Trigger preview (auto-selects inplace/full)
-- `POST /api/preview/full` — Force full redraw
-- `POST /api/preview/inplace` — Force inplace swap
-- `POST /api/mesh/load` — Load mesh
-- `GET /api/mesh/info` — Mesh info
-- `GET /api/log` — Recent log entries
-- `POST /api/export` — Export mod (body: `{name, author?, version?, description?, target: "local"|"penumbra", outputPath?, groupIndices?: [int]}`)
+- `GET /api/status` -- Plugin status
+- `GET /api/project` -- Current project JSON
+- `POST /api/layer` -- Add layer
+- `PUT /api/layer/{id}` -- Modify layer params
+- `DELETE /api/layer/{id}` -- Delete layer
+- `POST /api/preview` -- Trigger preview (auto-selects inplace/full)
+- `POST /api/preview/full` -- Force full redraw
+- `POST /api/preview/inplace` -- Force inplace swap
+- `POST /api/mesh/load` -- Load mesh
+- `GET /api/mesh/info` -- Mesh info
+- `GET /api/log` -- Recent log entries
+- `POST /api/export` -- Export mod (body: `{name, author?, version?, description?, target: "local"|"penumbra", outputPath?, groupIndices?: [int]}`)
 
 ## Core Pipeline
 
 ### First Preview (Full Redraw)
 ```
-PNG image → CPU UV composite → write temp .tex/.mtrl → Penumbra temp mod → character redraw (flashes once)
+PNG image -> CPU UV composite -> write temp .tex/.mtrl -> Penumbra temp mod -> character redraw (flashes once)
 ```
 
 ### Subsequent Adjustments (GPU Swap, flicker-free)
 ```
-Parameter change → async CPU composite (background thread) → atomic GPU texture swap (main thread, instant)
+Parameter change -> async CPU composite (background thread) -> atomic GPU texture swap (main thread, instant)
 ```
 
-`TextureSwapService` directly manipulates `CharacterBase→Model→Material→TextureResourceHandle→Texture*` pointers.
+`TextureSwapService` directly manipulates `CharacterBase->Model->Material->TextureResourceHandle->Texture*` pointers.
 Uses `Device.CreateTexture2D` + `InitializeContents` + `Interlocked.Exchange` for zero-flicker texture replacement.
 `ReplaceColorTableRaw` / `UpdateEmissiveViaColorTable` scan **all** matching material slots and replace each one (same mtrl may be referenced by multiple Model slots).
 
@@ -121,7 +121,7 @@ Uses `Device.CreateTexture2D` + `InitializeContents` + `Interlocked.Exchange` fo
 - Reuses `PreviewService.CompositeForExport` entry point (visible layers only, no runtime state pollution)
 - `Services/PmpPackageWriter.cs` packs staging dir into `.pmp` zip (meta.json + default_mod.json + game path mirror)
 - Two paths: local save / `PenumbraBridge.InstallMod` IPC
-- **install pmp path**: `<pluginConfigDir>/export_temp/install_pending.pmp`, fixed location, overwritten on next install, cleaned on `ModExportService.Dispose()`. Cannot delete immediately after IPC return — `InstallMod` is async-queued, Penumbra reads the file after IPC returns.
+- **install pmp path**: `<pluginConfigDir>/export_temp/install_pending.pmp`, fixed location, overwritten on next install, cleaned on `ModExportService.Dispose()`. Cannot delete immediately after IPC return -- `InstallMod` is async-queued, Penumbra reads the file after IPC returns.
 
 Decals composite directly in UV space: positioned by `UvCenter`/`UvScale`/`RotationDeg`, sampling each output texture pixel from the decal, alpha-blended onto the base texture.
 
@@ -131,7 +131,7 @@ Decal half-clip preprocessing: `ClipMode` (None/ClipLeft/ClipRight/ClipTop/ClipB
 
 **Initialization path (executed once during Full Redraw):**
 - `MtrlFileWriter` modifies .mtrl file:
-  - Sets `CategorySkinType` shader key → `ValueEmissive` (0x72E697CD)
+  - Sets `CategorySkinType` shader key -> `ValueEmissive` (0x72E697CD)
   - Writes `g_EmissiveColor` (0x38A64362) shader constant
   - Preserves original `AdditionalData` bytes (Lumina skips this field)
 - Normal map alpha channel as emissive mask (UV-space composite)
@@ -141,8 +141,8 @@ Decal half-clip preprocessing: `ClipMode` (None/ClipLeft/ClipRight/ClipTop/ClipB
 - `EmissiveCBufferHook` hooks `ModelRenderer.OnRenderMaterial`
 - Modifies CBuffer data via `LoadSourcePointer` within the render pipeline
 - UI color/intensity sliders call `TryDirectEmissiveUpdate()` directly, 1-frame latency
-- Materials with ColorTable (character.shpk etc.) → ColorTable texture atomic swap (ref. Glamourer)
-- skin.shpk materials (no ColorTable) → EmissiveCBufferHook real-time CBuffer update
+- Materials with ColorTable (character.shpk etc.) -> ColorTable texture atomic swap (ref. Glamourer)
+- skin.shpk materials (no ColorTable) -> EmissiveCBufferHook real-time CBuffer update
 
 **State cleanup:**
 - Unchecking "emissive" or hiding a layer calls `InvalidateEmissiveForGroup()` which clears only that group's hook target (not all groups)
@@ -154,17 +154,17 @@ Iris emissive is auto-detected when TargetGroup.MtrlGamePath contains `_iri_`.
 Uses the same EmissiveCBufferHook (g_EmissiveColor CRC 0x38A64362 exists in iris.shpk).
 
 **Full Redraw path:**
-- `TryPatchEmissiveRaw` patches g_EmissiveColor + g_IrisRingEmissiveIntensity (0x7DABA471, default 0.25 → 1.0) in mtrl
+- `TryPatchEmissiveRaw` patches g_EmissiveColor + g_IrisRingEmissiveIntensity (0x7DABA471, default 0.25 -> 1.0) in mtrl
 - `CompositeIrisMask` composites decal shapes into mask texture red channel (emissive mask)
   - Loads vanilla mask via g_SamplerMask (CRC 0x8A4E82B6) from mtrl
-  - Red channel = decal alpha × blue channel (iris area clip)
+  - Red channel = decal alpha * blue channel (iris area clip)
 - Redirects patched mask + mtrl via Penumbra
 
 **In-place swap path:**
 - Re-composites iris mask on UV changes, GPU-swaps mask texture
 - CBuffer hook updates g_EmissiveColor in real-time
 
-**Key constraint:** iris emissive requires mask red channel ≠ 0. Vanilla eyes may have red=0; glow-compatible eye mods have it pre-set. Plugin auto-generates mask from blue channel.
+**Key constraint:** iris emissive requires mask red channel != 0. Vanilla eyes may have red=0; glow-compatible eye mods have it pre-set. Plugin auto-generates mask from blue channel.
 
 ### skin.shpk Emissive Limitation
 
@@ -189,11 +189,11 @@ skin.shpk has a single g_EmissiveColor CBuffer constant per material. All layers
 
 ### character.shpk ColorTable row number is determined by normal.a
 - 32-row ColorTable is actually 16 row pairs, indexed by normal map alpha channel
-- Row formula: `tablePair = round(normal.a / 17)` → 0-15
+- Row formula: `tablePair = round(normal.a / 17)` -> 0-15
 - Intra-pair interpolation weight: `rowBlend = 1 - normal.g / 255`
 - Both rows in a pair are lerped, all PBR fields (diffuse/specular/emissive/roughness/metalness) interpolate together
 - Source: `Penumbra/Import/Models/Export/MaterialExporter.cs:136-149`
-- This is the physical basis for "independent PBR per decal layer" — assign each layer an independent row pair, write the corresponding row index in normal.a during composite
+- This is the physical basis for "independent PBR per decal layer" -- assign each layer an independent row pair, write the corresponding row index in normal.a during composite
 
 ### Vanilla engine includes charactertattoo.shpk
 - Shader package string array @ `0x14206d3a0` (IDA: ffxiv_dx11.exe), 57 entries
@@ -209,8 +209,8 @@ skin.shpk has a single g_EmissiveColor CBuffer constant per material. All layers
 ### Vanilla engine does fast-path pointer comparison on ShaderPackage
 - Inside OnRenderMaterial, `material->ShaderPackage` is compared against 5 cached ShaderPackage pointers in ModelRenderer
 - Different render flag branches
-- **Implication**: switching a .mtrl's ShaderPackage to another valid shader causes the engine to automatically route via fast-path — no hook intervention needed, **just changing ShaderPackageName in the .mtrl file is enough to switch shaders**
-- This is the basis for greatly simplifying Route C (skin.shpk → character.shpk conversion)
+- **Implication**: switching a .mtrl's ShaderPackage to another valid shader causes the engine to automatically route via fast-path -- no hook intervention needed, **just changing ShaderPackageName in the .mtrl file is enough to switch shaders**
+- This is the basis for greatly simplifying Route C (skin.shpk -> character.shpk conversion)
 
 ### ConstantBuffer Memory Layout (confirmed, 0x70 bytes)
 ```
@@ -242,7 +242,7 @@ GPU buffers are created/uploaded on-demand by the render submission pipeline.
 3. Looks up `g_EmissiveColor` (CRC 0x38A64362) offset from `ShaderPackage.MaterialElements` (result cached)
 4. Calls `LoadSourcePointer(offset, 12, 2)` to mark dirty and get writable pointer
 5. Writes new RGB values
-6. Calls original function → render submission reads updated data → GPU upload
+6. Calls original function -> render submission reads updated data -> GPU upload
 
 **Thread safety**: `ConcurrentDictionary` ensures UI thread writes / render thread reads don't conflict
 
@@ -252,20 +252,20 @@ GPU buffers are created/uploaded on-demand by the render submission pipeline.
 
 ## 3D Decal Editor
 
-Standalone ImGui window (`ModelEditorWindow`), DX11 offscreen rendering → `ImGui.ImageButton` display.
+Standalone ImGui window (`ModelEditorWindow`), DX11 offscreen rendering -> `ImGui.ImageButton` display.
 
 ### Architecture
 ```
-DxRenderer (offscreen render) → ShaderResourceView → ImGui.ImageButton
-OrbitCamera (orbit camera) → View/Proj matrices
-MeshBuffer (GPU buffers) ← MeshData (CPU)
-RayPicker (ray picking) → UV coordinates → DecalLayer.UvCenter → composite pipeline
+DxRenderer (offscreen render) -> ShaderResourceView -> ImGui.ImageButton
+OrbitCamera (orbit camera) -> View/Proj matrices
+MeshBuffer (GPU buffers) <- MeshData (CPU)
+RayPicker (ray picking) -> UV coordinates -> DecalLayer.UvCenter -> composite pipeline
 ```
 
 ### Coordinate System Conventions
-- **World matrix**: `Scaling(-1, 1, 1)` — FFXIV model X-axis mirrored
-- **Camera default**: `Yaw = 0` — model faces camera
-- **Mesh UV**: `uv = rawUv` — Meddle returns raw UV, used directly (FFXIV body model UV X is typically in [1,2], canvas maps to the right half of virtual square space via `uvScale`)
+- **World matrix**: `Scaling(-1, 1, 1)` -- FFXIV model X-axis mirrored
+- **Camera default**: `Yaw = 0` -- model faces camera
+- **Mesh UV**: `uv = rawUv` -- Meddle returns raw UV, used directly (FFXIV body model UV X is typically in [1,2], canvas maps to the right half of virtual square space via `uvScale`)
 - **Ray picking**: Ray X negated (matches World X mirror), UV used directly (no flip)
 - **Shader**: `output.uv = input.uv` (no flip)
 
@@ -291,7 +291,7 @@ RayPicker (ray picking) → UV coordinates → DecalLayer.UvCenter → composite
 
 ## In-Game Testing
 
-1. `/xlsettings` → Dev Plugin Locations → add output directory
-2. `/xlplugins` → enable SkinTattoo
-3. `/skintattoo` → open editor
+1. `/xlsettings` -> Dev Plugin Locations -> add output directory
+2. `/xlplugins` -> enable SkinTattoo
+3. `/skintattoo` -> open editor
 4. HTTP: `curl http://localhost:12580/api/status`
