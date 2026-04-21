@@ -88,7 +88,6 @@ public partial class MainWindow
                         {
                             var path = paths[0];
                             var picked = g.Layers[capturedLi];
-                            var oldPath = picked.ImagePath;
                             var entry = library?.ImportFromPath(path);
                             if (entry != null)
                             {
@@ -106,7 +105,7 @@ public partial class MainWindow
                             config.LastImageDir = System.IO.Path.GetDirectoryName(path);
                             config.Save();
                             TryAutoDetectNormalMap(picked);
-                            OnLayerFileChanged(g, oldPath, picked.ImagePath);
+                            MarkPreviewDirty();
                         }
                     }
                 },
@@ -117,13 +116,12 @@ public partial class MainWindow
         ImGui.SetNextItemWidth(-1);
         if (ImGui.InputText("##ImagePath", ref imagePathBuf, 512))
         {
-            var oldPath = layer.ImagePath;
             layer.ImagePath = imagePathBuf;
             layer.ImageHash = null;
             AutoFitLayerScale(group, layer);
             lastEditedLayerIndex = idx;
             TryAutoDetectNormalMap(layer);
-            OnLayerFileChanged(group, oldPath, layer.ImagePath);
+            MarkPreviewDirty();
         }
 
         const float labelW = 80f;
@@ -176,7 +174,6 @@ public partial class MainWindow
             var resolved = library.ResolveDiskPath(entry.Hash);
             if (resolved == null) return;
 
-            var oldPath = picked.ImagePath;
             picked.ImageHash = entry.Hash;
             picked.ImagePath = resolved;
             LibraryWindowRef.SetSelectedEntry(entry.Hash);
@@ -185,7 +182,7 @@ public partial class MainWindow
             imagePathBuf = resolved;
             lastEditedLayerIndex = g.SelectedLayerIndex;
             TryAutoDetectNormalMap(picked);
-            OnLayerFileChanged(g, oldPath, picked.ImagePath);
+            MarkPreviewDirty();
         };
         LibraryWindowRef.SetSelectedEntry(layer.ImageHash);
         LibraryWindowRef.IsOpen = true;
@@ -217,29 +214,6 @@ public partial class MainWindow
         if (layer.AffectsEmissive) return;
         if (previewService.IsLikelyEmissiveMask(layer.ImagePath))
             layer.AffectsEmissive = true;
-    }
-
-    private void OnLayerFileChanged(TargetGroup group, string? oldPath, string? newPath)
-    {
-        if (AreSameLayerFilePath(oldPath, newPath))
-            return;
-
-        previewService.LoadMeshForGroup(group);
-        previewService.NotifyMeshChanged();
-        previewService.ForceFullRedrawNextCycle();
-        MarkPreviewDirty(immediate: true);
-    }
-
-    private static bool AreSameLayerFilePath(string? left, string? right)
-        => string.Equals(NormalizeLayerFilePath(left), NormalizeLayerFilePath(right), StringComparison.OrdinalIgnoreCase);
-
-    private static string? NormalizeLayerFilePath(string? path)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-            return null;
-
-        var normalized = path.Trim().Replace('\\', '/');
-        return normalized.Length == 0 ? null : normalized;
     }
 
     private static void DrawInfoIcon(string tooltip)
