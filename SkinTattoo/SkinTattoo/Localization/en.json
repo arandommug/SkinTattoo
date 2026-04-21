@@ -59,7 +59,8 @@
     },
     "folder": {
       "all": "All",
-      "name_hint": "Folder name"
+      "name_hint": "Folder name",
+      "delete_prompt": "Delete folder \"{0}\"?\nEntries inside will move to the parent folder (no resources are deleted)."
     },
     "import_folder_hint": "Folder path...",
     "import_folder_button": "Import Folder",
@@ -74,7 +75,8 @@
     },
     "menu": {
       "apply": "Apply to current layer",
-      "delete": "Remove from library"
+      "delete": "Remove from library",
+      "delete_folder": "Delete folder"
     }
   },
   "button": {
@@ -192,7 +194,7 @@
     "section_performance": "Performance",
     "section_advanced": "Advanced",
     "delete_modifier": "Delete modifier",
-    "open_debug_window": "Open debug window",
+    "open_debug_window": "Open debug log",
     "penumbra_connected": "Penumbra Connected",
     "penumbra_disconnected": "Penumbra Disconnected",
     "center_x": "Center X",

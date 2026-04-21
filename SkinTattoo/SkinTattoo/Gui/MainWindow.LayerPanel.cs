@@ -18,7 +18,7 @@ public partial class MainWindow
     private void DrawLayerPanel()
     {
         // Group-level buttons
-        if (ImGuiComponents.IconButton(10, FontAwesomeIcon.Plus))
+        if (UiHelpers.SquareIconButton(10, FontAwesomeIcon.Plus))
         {
             resourceWindowOpen = true;
             RefreshResources();
@@ -29,7 +29,7 @@ public partial class MainWindow
         var canDeleteGroup = project.SelectedGroupIndex >= 0 && IsDeleteModifierHeld();
         using (ImRaii.Disabled(!canDeleteGroup))
         {
-            if (ImGuiComponents.IconButton(11, FontAwesomeIcon.Trash))
+            if (UiHelpers.SquareIconButton(11, FontAwesomeIcon.Trash))
             {
                 var gi2 = project.SelectedGroupIndex;
                 if (gi2 >= 0 && gi2 < project.Groups.Count)
@@ -54,7 +54,7 @@ public partial class MainWindow
         var canCopyGroup = selectedGroup != null && selectedGroup.Layers.Count > 0;
         using (ImRaii.Disabled(!canCopyGroup))
         {
-            if (ImGuiComponents.IconButton(12, FontAwesomeIcon.Copy))
+            if (UiHelpers.SquareIconButton(12, FontAwesomeIcon.Copy))
                 CopyDecalGroup(selectedGroup!);
         }
         if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
@@ -62,17 +62,15 @@ public partial class MainWindow
 
         ImGui.SameLine();
         var canPasteGroup = copiedGroupLayers != null && project.SelectedGroupIndex >= 0
-                            && project.SelectedGroupIndex < project.Groups.Count;
+                            && project.SelectedGroupIndex < project.Groups.Count
+                            && project.Groups[project.SelectedGroupIndex] != copiedGroupSource;
         using (ImRaii.Disabled(!canPasteGroup))
         {
-            if (ImGuiComponents.IconButton(13, FontAwesomeIcon.Paste))
+            if (UiHelpers.SquareIconButton(13, FontAwesomeIcon.Paste))
                 PasteDecalGroup(project.SelectedGroupIndex);
         }
         if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
             ImGui.SetTooltip(Strings.T("menu.paste_decal_group"));
-
-        ImGui.SameLine();
-        ImGui.TextDisabled($"({project.Groups.Count})");
 
         ImGui.Separator();
 
@@ -118,38 +116,29 @@ public partial class MainWindow
         ImGui.PushStyleColor(ImGuiCol.Button, 0);
         ImGui.PushStyleColor(ImGuiCol.ButtonHovered, ImGui.GetColorU32(new Vector4(1, 1, 1, 0.1f)));
         ImGui.PushStyleColor(ImGuiCol.ButtonActive, 0);
-        if (ImGuiComponents.IconButton(50, arrowIcon))
+        if (UiHelpers.SquareIconButton(50, arrowIcon))
             group.IsExpanded = !group.IsExpanded;
         ImGui.PopStyleColor(3);
-
-        // Add-layer button right after the chevron
-        ImGui.SameLine();
-        if (ImGuiComponents.IconButton(20, FontAwesomeIcon.Plus))
-        {
-            project.SelectedGroupIndex = gi;
-            layerCounter++;
-            var newLayer = group.AddLayer(Strings.T("layer.default.name", layerCounter));
-            var (tw, th) = previewService.GetBaseTextureSize(group);
-            float texAspect = (tw > 0 && th > 0) ? (float)tw / th : 1f;
-            newLayer.UvScale = new Vector2(newLayer.UvScale.X, newLayer.UvScale.X * texAspect);
-            SyncImagePathBuf();
-        }
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip(Strings.T("tooltip.add_layer"));
 
         // Group name
         ImGui.SameLine();
         ImGui.SetCursorPosY(ImGui.GetCursorPosY() + 2);
         var headerPad = 6f;
-        var layerCountText = $"({group.Layers.Count})";
-        var layerCountWidth = ImGui.CalcTextSize(layerCountText).X;
-        var nameWidth = availWidth - (ImGui.GetCursorScreenPos().X - headerStart.X) - layerCountWidth - (headerPad * 2f);
+        var headerAddBtnSize = ImGui.GetFrameHeight();
+        var nameWidth = availWidth - (ImGui.GetCursorScreenPos().X - headerStart.X) - headerAddBtnSize - (headerPad * 2f);
         if (nameWidth < 20) nameWidth = 20;
+        // Suppress Selectable's own hover/active backgrounds: the header card already
+        // has its own background drawn via drawList, layered hover bg looks split.
+        ImGui.PushStyleColor(ImGuiCol.HeaderHovered, 0u);
+        ImGui.PushStyleColor(ImGuiCol.HeaderActive, 0u);
+        ImGui.PushStyleColor(ImGuiCol.Header, 0u);
         if (ImGui.Selectable($"{group.Name}##grpHdr", false, ImGuiSelectableFlags.None,
             new Vector2(nameWidth, ImGui.GetTextLineHeight())))
         {
             project.SelectedGroupIndex = gi;
             group.SelectedLayerIndex = -1;
         }
+        ImGui.PopStyleColor(3);
 
         // Path tooltip and right-click context menu attach to the group name selectable.
         if (ImGui.IsItemHovered())
@@ -187,17 +176,25 @@ public partial class MainWindow
             if (ImGui.MenuItem(Strings.T("menu.copy_decal_group")))
                 CopyDecalGroup(group);
 
-            using (ImRaii.Disabled(copiedGroupLayers == null))
+            using (ImRaii.Disabled(copiedGroupLayers == null || group == copiedGroupSource))
                 if (ImGui.MenuItem(Strings.T("menu.paste_decal_group")))
                     PasteDecalGroup(gi);
             ImGui.EndPopup();
         }
 
-        // Right-aligned layer count
-        var countX = headerStart.X + availWidth - layerCountWidth - headerPad;
-        ImGui.SetCursorScreenPos(new Vector2(countX, headerStart.Y + 2f));
-        ImGui.AlignTextToFramePadding();
-        ImGui.TextDisabled(layerCountText);
+        var addBtnX = headerStart.X + availWidth - headerAddBtnSize - headerPad;
+        ImGui.SetCursorScreenPos(new Vector2(addBtnX, headerStart.Y + 2f));
+        if (UiHelpers.SquareIconButton(20, FontAwesomeIcon.Plus))
+        {
+            project.SelectedGroupIndex = gi;
+            layerCounter++;
+            var newLayer = group.AddLayer(Strings.T("layer.default.name", layerCounter));
+            var (tw, th) = previewService.GetBaseTextureSize(group);
+            float texAspect = (tw > 0 && th > 0) ? (float)tw / th : 1f;
+            newLayer.UvScale = new Vector2(newLayer.UvScale.X, newLayer.UvScale.X * texAspect);
+            SyncImagePathBuf();
+        }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip(Strings.T("tooltip.add_layer"));
 
         // Ensure cursor is past header
         ImGui.SetCursorScreenPos(new Vector2(headerStart.X, headerEnd.Y));
@@ -207,8 +204,11 @@ public partial class MainWindow
         // -- Card body --
         var bodyStart = ImGui.GetCursorScreenPos();
 
-        drawList.ChannelsSplit(2);
-        drawList.ChannelsSetCurrent(1);
+        // 3 channels: 0=body backdrop, 1=layer card bg/border, 2=layer card content.
+        // Body backdrop is painted on channel 0 after the loop using saved bodyEnd, but
+        // because channels replay in numeric order, it stays UNDER the cards on channel 1.
+        drawList.ChannelsSplit(3);
+        drawList.ChannelsSetCurrent(2);
 
         ImGui.Indent(6);
 
@@ -218,11 +218,13 @@ public partial class MainWindow
         ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(4, 3));
 
         float buttonSize = ImGui.GetFrameHeight();
-        float selectableHeight = ImGui.GetTextLineHeight() + ImGui.GetStyle().FramePadding.Y * 2;
-        const float rowGap = 2f;
+        float gap = ImGui.GetStyle().ItemSpacing.X;
         const float cardPadX = 4f;
         const float cardPadY = 3f;
-        const float layerSpacing = 4f;
+        const float layerSpacing = 2f;
+        // Action strip: highlight, up, down, duplicate, delete  (5 buttons + 4 gaps).
+        float actionStripWidth = buttonSize * 5 + gap * 4;
+        float cardHeight = buttonSize + cardPadY * 2;
 
         for (int li = 0; li < group.Layers.Count; li++)
         {
@@ -236,54 +238,42 @@ public partial class MainWindow
             var layerStart = ImGui.GetCursorScreenPos();
             var rowAvail = ImGui.GetContentRegionAvail().X;
             var cardWidth = rowAvail - 2f;
-            var cardHeight = cardPadY * 2 + buttonSize + rowGap + selectableHeight;
-
-            // Layer card background fill
-            var bgColor = isLayerSelected
-                ? ImGui.GetColorU32(new Vector4(0.24f, 0.42f, 0.65f, 0.45f))
-                : ImGui.GetColorU32(new Vector4(1f, 1f, 1f, 0.04f));
-            // Layer card border: brighter when selected so it pops
-            var borderColor = isLayerSelected
-                ? ImGui.GetColorU32(new Vector4(0.45f, 0.70f, 1f, 1f))
-                : ImGui.GetColorU32(new Vector4(1f, 1f, 1f, 0.18f));
-            var borderThickness = isLayerSelected ? 1.5f : 1f;
-
-            drawList.ChannelsSetCurrent(0);
             var cardEnd = layerStart + new Vector2(cardWidth, cardHeight);
+
+            bool isHovered = ImGui.IsMouseHoveringRect(layerStart, cardEnd, false);
+            bool showActions = isLayerSelected || isHovered;
+
+            uint bgColor;
+            uint borderColor;
+            float borderThickness;
+            if (isLayerSelected)
+            {
+                bgColor = ImGui.GetColorU32(new Vector4(0.22f, 0.48f, 0.85f, 0.65f));
+                borderColor = ImGui.GetColorU32(new Vector4(0.55f, 0.80f, 1f, 1f));
+                borderThickness = 2f;
+            }
+            else if (isHovered)
+            {
+                bgColor = ImGui.GetColorU32(new Vector4(1f, 1f, 1f, 0.08f));
+                borderColor = ImGui.GetColorU32(new Vector4(1f, 1f, 1f, 0.22f));
+                borderThickness = 1f;
+            }
+            else
+            {
+                bgColor = ImGui.GetColorU32(new Vector4(1f, 1f, 1f, 0.03f));
+                borderColor = ImGui.GetColorU32(new Vector4(1f, 1f, 1f, 0.12f));
+                borderThickness = 1f;
+            }
+            drawList.ChannelsSetCurrent(1);
             drawList.AddRectFilled(layerStart, cardEnd, bgColor, 4f);
             drawList.AddRect(layerStart, cardEnd, borderColor, 4f, ImDrawFlags.None, borderThickness);
-            drawList.ChannelsSetCurrent(1);
+            drawList.ChannelsSetCurrent(2);
 
-            // Inset content inside card padding
             ImGui.SetCursorScreenPos(layerStart + new Vector2(cardPadX, cardPadY));
-            ImGui.BeginGroup();
-
-            // Tighten the gap between row 1 (name) and row 2 (buttons): they share one card.
-            ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, new Vector2(ImGui.GetStyle().ItemSpacing.X, rowGap));
-
-            // -- Row 1: name selectable (full width inside card) --
-            // selected=false so the Selectable doesn't draw its own highlight on top of
-            // our card background -- the card alone communicates selection.
-            var nameW = cardWidth - cardPadX * 2;
-            if (nameW < 20f) nameW = 20f;
-            if (ImGui.Selectable(layer.Name, false, ImGuiSelectableFlags.None,
-                    new Vector2(nameW, selectableHeight)))
-            {
-                project.SelectedGroupIndex = gi;
-                group.SelectedLayerIndex = li;
-                SyncImagePathBuf();
-            }
-            if (ImGui.IsItemHovered() && ImGui.CalcTextSize(layer.Name).X > nameW)
-                ImGui.SetTooltip(layer.Name);
-
-            ImGui.PopStyleVar();
-
-            // -- Row 2: action buttons --
-            // Layout: visibility | highlight | up | down | duplicate | delete
             var visIcon = layer.IsVisible ? FontAwesomeIcon.Eye : FontAwesomeIcon.EyeSlash;
             var visColor = layer.IsVisible ? new Vector4(1, 1, 1, 1) : new Vector4(0.5f, 0.5f, 0.5f, 1);
             ImGui.PushStyleColor(ImGuiCol.Text, visColor);
-            if (ImGuiComponents.IconButton(100 + li, visIcon))
+            if (UiHelpers.SquareIconButton(100 + li, visIcon, buttonSize))
             {
                 layer.IsVisible = !layer.IsVisible;
                 if (layer.AffectsEmissive || layer.RequiresRowPair)
@@ -294,62 +284,102 @@ public partial class MainWindow
             ImGui.PopStyleColor();
 
             ImGui.SameLine();
-            using (ImRaii.Disabled(!canHighlight))
+            float nameStartX = ImGui.GetCursorScreenPos().X;
+            float nameAvailEndX = layerStart.X + cardWidth - cardPadX
+                                  - (showActions ? actionStripWidth + gap : 0f);
+            float nameW = MathF.Max(20f, nameAvailEndX - nameStartX);
+            float selectableHeight = ImGui.GetTextLineHeight() + ImGui.GetStyle().FramePadding.Y * 2;
+            float selOffsetY = (buttonSize - selectableHeight) * 0.5f;
+            if (selOffsetY > 0) ImGui.SetCursorPosY(ImGui.GetCursorPosY() + selOffsetY);
+
+            // Make Selectable's own hover/active backgrounds transparent so they don't
+            // double-up with the card's hover bg drawn on channel 1.
+            ImGui.PushStyleColor(ImGuiCol.HeaderHovered, 0u);
+            ImGui.PushStyleColor(ImGuiCol.HeaderActive, 0u);
+            ImGui.PushStyleColor(ImGuiCol.Header, 0u);
+            if (ImGui.Selectable(layer.Name, false, ImGuiSelectableFlags.None,
+                    new Vector2(nameW, selectableHeight)))
             {
-                if (isThisHighlighted)
+                project.SelectedGroupIndex = gi;
+                group.SelectedLayerIndex = li;
+                SyncImagePathBuf();
+            }
+            ImGui.PopStyleColor(3);
+
+            if (ImGui.IsItemHovered() && ImGui.CalcTextSize(layer.Name).X > nameW)
+                ImGui.SetTooltip(layer.Name);
+
+            if (showActions)
+            {
+                float actionStartX = layerStart.X + cardWidth - cardPadX - actionStripWidth;
+                ImGui.SetCursorScreenPos(new Vector2(actionStartX, layerStart.Y + cardPadY));
+
+                using (ImRaii.Disabled(!canHighlight))
                 {
-                    var iconHue = (highlightFrameCounter % HighlightCycleSteps) / (float)HighlightCycleSteps;
-                    var ic = TextureSwapService.HsvToRgb(iconHue, 0.8f, 1f);
-                    ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(ic.X, ic.Y, ic.Z, 1f));
+                    if (isThisHighlighted)
+                    {
+                        var iconHue = (highlightFrameCounter % HighlightCycleSteps) / (float)HighlightCycleSteps;
+                        var ic = TextureSwapService.HsvToRgb(iconHue, 0.8f, 1f);
+                        ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(ic.X, ic.Y, ic.Z, 1f));
+                    }
+                    bool hlClicked = UiHelpers.SquareIconButton(200 + li, FontAwesomeIcon.Crosshairs, buttonSize);
+                    if (isThisHighlighted) ImGui.PopStyleColor();
+                    if (hlClicked)
+                    {
+                        SelectLayer(gi, li);
+                        ToggleLayerHighlight(group, gi, li, isThisHighlighted);
+                    }
                 }
-                bool hlClicked = ImGuiComponents.IconButton(200 + li, FontAwesomeIcon.Crosshairs);
-                if (isThisHighlighted) ImGui.PopStyleColor();
-                if (hlClicked) ToggleLayerHighlight(group, gi, li, isThisHighlighted);
-            }
-            if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-                ImGui.SetTooltip(isThisHighlighted
-                    ? Strings.T("tooltip.highlight_off")
-                    : Strings.T("tooltip.highlight_on"));
+                if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+                    ImGui.SetTooltip(isThisHighlighted
+                        ? Strings.T("tooltip.highlight_off")
+                        : Strings.T("tooltip.highlight_on"));
 
-            ImGui.SameLine();
-            using (ImRaii.Disabled(li <= 0))
-            {
-                if (ImGuiComponents.IconButton(220 + li, FontAwesomeIcon.ArrowUp))
+                ImGui.SameLine();
+                using (ImRaii.Disabled(li <= 0))
                 {
-                    group.MoveLayerUp(li);
-                    SyncImagePathBuf();
-                    MarkPreviewDirty();
+                    if (UiHelpers.SquareIconButton(220 + li, FontAwesomeIcon.ArrowUp, buttonSize))
+                    {
+                        SelectLayer(gi, li - 1);
+                        group.MoveLayerUp(li);
+                        SyncImagePathBuf();
+                        MarkPreviewDirty();
+                    }
                 }
-            }
 
-            ImGui.SameLine();
-            using (ImRaii.Disabled(li >= group.Layers.Count - 1))
-            {
-                if (ImGuiComponents.IconButton(240 + li, FontAwesomeIcon.ArrowDown))
+                ImGui.SameLine();
+                using (ImRaii.Disabled(li >= group.Layers.Count - 1))
                 {
-                    group.MoveLayerDown(li);
-                    SyncImagePathBuf();
-                    MarkPreviewDirty();
+                    if (UiHelpers.SquareIconButton(240 + li, FontAwesomeIcon.ArrowDown, buttonSize))
+                    {
+                        SelectLayer(gi, li + 1);
+                        group.MoveLayerDown(li);
+                        SyncImagePathBuf();
+                        MarkPreviewDirty();
+                    }
                 }
+
+                ImGui.SameLine();
+                if (UiHelpers.SquareIconButton(280 + li, FontAwesomeIcon.Copy, buttonSize))
+                {
+                    SelectLayer(gi, li);
+                    duplicateLayerIndex = li;
+                }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip(Strings.T("menu.duplicate_layer"));
+
+                ImGui.SameLine();
+                using (ImRaii.Disabled(!IsDeleteModifierHeld()))
+                {
+                    if (UiHelpers.SquareIconButton(260 + li, FontAwesomeIcon.Trash, buttonSize))
+                    {
+                        SelectLayer(gi, li);
+                        deleteLayerIndex = li;
+                    }
+                }
+                if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+                    ImGui.SetTooltip(Strings.T("tooltip.delete_layer"));
             }
 
-            ImGui.SameLine();
-            if (ImGuiComponents.IconButton(280 + li, FontAwesomeIcon.Copy))
-                duplicateLayerIndex = li;
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip(Strings.T("menu.duplicate_layer"));
-
-            ImGui.SameLine();
-            using (ImRaii.Disabled(!IsDeleteModifierHeld()))
-            {
-                if (ImGuiComponents.IconButton(260 + li, FontAwesomeIcon.Trash))
-                    deleteLayerIndex = li;
-            }
-            if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-                ImGui.SetTooltip(Strings.T("tooltip.delete_layer"));
-
-            ImGui.EndGroup();
-
-            // Move cursor to end of card + spacing for next layer
             ImGui.SetCursorScreenPos(layerStart + new Vector2(0, cardHeight + layerSpacing));
 
             ImGui.PopID();
@@ -386,6 +416,7 @@ public partial class MainWindow
             copiedGroupLayers.Add(layer.Clone());
 
         copiedGroupSelectedLayerIndex = group.SelectedLayerIndex;
+        copiedGroupSource = group;
 
         var (sw, sh) = previewService.GetBaseTextureSize(group);
         copiedGroupSrcAspect = (sw > 0 && sh > 0) ? (float)sw / sh : 0f;
@@ -483,5 +514,15 @@ public partial class MainWindow
         SyncImagePathBuf();
         previewService.ForceFullRedrawNextCycle();
         MarkPreviewDirty(immediate: true);
+    }
+
+    private void SelectLayer(int groupIndex, int layerIndex)
+    {
+        if (groupIndex < 0 || groupIndex >= project.Groups.Count) return;
+        var g = project.Groups[groupIndex];
+        if (layerIndex < 0 || layerIndex >= g.Layers.Count) return;
+        project.SelectedGroupIndex = groupIndex;
+        g.SelectedLayerIndex = layerIndex;
+        SyncImagePathBuf();
     }
 }

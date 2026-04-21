@@ -53,7 +53,8 @@
     },
     "folder": {
       "all": "全部",
-      "name_hint": "文件夹名称"
+      "name_hint": "文件夹名称",
+      "delete_prompt": "删除文件夹 \"{0}\"？\n夹内素材将移到上级文件夹（不会被删除）。"
     },
     "import_folder_hint": "文件夹路径...",
     "import_folder_button": "导入文件夹",
@@ -68,7 +69,8 @@
     },
     "menu": {
       "apply": "应用到当前图层",
-      "delete": "从素材库中删除"
+      "delete": "从素材库中删除",
+      "delete_folder": "删除文件夹"
     }
   },
   "tab": {
@@ -192,7 +194,7 @@
     "section_performance": "性能",
     "section_advanced": "高级设置",
     "delete_modifier": "删除组合键",
-    "open_debug_window": "打开调试窗口",
+    "open_debug_window": "打开调试日志",
     "penumbra_connected": "Penumbra 已连接",
     "penumbra_disconnected": "Penumbra 未连接",
     "center_x": "中心 X",

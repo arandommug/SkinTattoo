@@ -67,6 +67,11 @@ public partial class MainWindow
         if (!ImGui.CollapsingHeader(Strings.T("section.image"), ImGuiTreeNodeFlags.DefaultOpen)) return;
 
         var halfBtnW = (ImGui.GetContentRegionAvail().X - ImGui.GetStyle().ItemSpacing.X) * 0.5f;
+        if (ImGui.Button(Strings.T("button.open_library") + "##ImgLibBtn", new Vector2(halfBtnW, 0f)))
+            OpenLibraryForLayer(group, layer, idx);
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip(Strings.T("tooltip.open_library"));
+
+        ImGui.SameLine();
         if (ImGui.Button(Strings.T("button.browse_image") + "##ImgBrowseBtn", new Vector2(halfBtnW, 0f)))
         {
             var capturedGi = project.SelectedGroupIndex;
@@ -107,11 +112,6 @@ public partial class MainWindow
                 1, config.LastImageDir, false);
         }
         if (ImGui.IsItemHovered()) ImGui.SetTooltip(Strings.T("tooltip.browse_image"));
-
-        ImGui.SameLine();
-        if (ImGui.Button(Strings.T("button.open_library") + "##ImgLibBtn", new Vector2(halfBtnW, 0f)))
-            OpenLibraryForLayer(group, layer, idx);
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip(Strings.T("tooltip.open_library"));
 
         ImGui.SetNextItemWidth(-1);
         if (ImGui.InputText("##ImagePath", ref imagePathBuf, 512))
@@ -278,7 +278,7 @@ public partial class MainWindow
         if (ImGui.IsItemHovered()) ImGui.SetTooltip(scaleLocked ? Strings.T("tooltip.scale_locked") : Strings.T("tooltip.scale_unlocked"));
         ImGui.SameLine();
         var lockIcon = scaleLocked ? FontAwesomeIcon.Link : FontAwesomeIcon.Unlink;
-        if (ImGuiComponents.IconButton(30, lockIcon))
+        if (UiHelpers.SquareIconButton(30, lockIcon))
             scaleLocked = !scaleLocked;
         if (ImGui.IsItemHovered()) ImGui.SetTooltip(scaleLocked ? Strings.T("tooltip.lock_ratio") : Strings.T("tooltip.unlock_ratio"));
 

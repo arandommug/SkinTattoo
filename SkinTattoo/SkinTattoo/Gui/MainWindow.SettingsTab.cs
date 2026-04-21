@@ -68,37 +68,29 @@ public partial class MainWindow
 
     private void DrawSettingsTab()
     {
-        var topY = ImGui.GetCursorPosY();
+        using var scroll = ImRaii.Child("##SettingsScroll", new Vector2(-1, -1), false);
+        if (!scroll.Success) return;
 
-        using (var scroll = ImRaii.Child("##SettingsScroll", new Vector2(-1, -1), false))
+        DrawGeneralSection();
+
+        var shpkConflict = previewService.SkinShpkModConflict;
+        if (!string.IsNullOrEmpty(shpkConflict))
         {
-            if (scroll.Success)
-            {
-                DrawGeneralSection();
-
-                var shpkConflict = previewService.SkinShpkModConflict;
-                if (!string.IsNullOrEmpty(shpkConflict))
-                {
-                    ImGui.Spacing();
-                    ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1f, 0.4f, 0.4f, 1f));
-                    ImGui.TextWrapped("Detected another Mod modifying skin.shpk:");
-                    ImGui.PopStyleColor();
-                    ImGui.TextWrapped(shpkConflict);
-                    ImGui.TextWrapped("When emissive is enabled, this plugin's skin.shpk will override that Mod's shader. " +
-                        "If rendering issues occur, disable the conflicting Mod in Penumbra.");
-                }
-
-                ImGui.Spacing();
-                ImGui.Spacing();
-
-                DrawInterfaceSection();
-                DrawPerformanceSection();
-                DrawAdvancedSection();
-            }
+            ImGui.Spacing();
+            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1f, 0.4f, 0.4f, 1f));
+            ImGui.TextWrapped("Detected another Mod modifying skin.shpk:");
+            ImGui.PopStyleColor();
+            ImGui.TextWrapped(shpkConflict);
+            ImGui.TextWrapped("When emissive is enabled, this plugin's skin.shpk will override that Mod's shader. " +
+                "If rendering issues occur, disable the conflicting Mod in Penumbra.");
         }
 
-        // Draw the about cluster AFTER the scroll child so it always paints on top.
-        DrawTopRightAboutCluster(topY);
+        ImGui.Spacing();
+        ImGui.Spacing();
+
+        DrawInterfaceSection();
+        DrawPerformanceSection();
+        DrawAdvancedSection();
     }
 
     private void DrawGeneralSection()
@@ -125,6 +117,19 @@ public partial class MainWindow
         }
 
         DrawLanguageSelector();
+        DrawAboutLinks();
+    }
+
+    private void DrawAboutLinks()
+    {
+        if (ImGui.Button("GitHub"))
+            OpenUrl(RepoUrl);
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip(Strings.T("tooltip.open_repo_help"));
+
+        ImGui.SameLine();
+        if (ImGui.Button("Discord"))
+            OpenUrl(DiscordUrl);
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip(Strings.T("tooltip.open_discord_help"));
     }
 
     private void DrawInterfaceSection()
@@ -217,7 +222,7 @@ public partial class MainWindow
         }
 
         ImGui.SameLine();
-        if (ImGui.SmallButton(Strings.T("button.default")))
+        if (UiHelpers.SquareIconButton(900, FontAwesomeIcon.Undo))
         {
             settingsPendingSwapInterval = SwapIntervalDefault;
             config.GameSwapIntervalMs = SwapIntervalDefault;
@@ -285,34 +290,6 @@ public partial class MainWindow
 
         ImGui.Unindent(8);
         ImGui.Spacing();
-    }
-
-    private void DrawTopRightAboutCluster(float topY)
-    {
-        var pad = ImGui.GetStyle().FramePadding.X * 2f;
-        var spacing = ImGui.GetStyle().ItemSpacing.X;
-        const string ghLabel = "GitHub";
-        const string dcLabel = "Discord";
-        var ghW = ImGui.CalcTextSize(ghLabel).X + pad;
-        var dcW = ImGui.CalcTextSize(dcLabel).X + pad;
-        var clusterWidth = ghW + dcW + spacing;
-        var rightX = ImGui.GetWindowContentRegionMax().X - clusterWidth;
-        if (ImGui.GetScrollMaxY() > 0)
-            rightX -= ImGui.GetStyle().ScrollbarSize;
-        if (rightX < 0) return;
-
-        ImGui.SetCursorPos(new Vector2(rightX, topY));
-        if (ImGui.Button(ghLabel))
-            OpenUrl(RepoUrl);
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip(Strings.T("tooltip.open_repo_help"));
-
-        ImGui.SameLine();
-        if (ImGui.Button(dcLabel))
-            OpenUrl(DiscordUrl);
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip(Strings.T("tooltip.open_discord_help"));
-
-        // Reset cursor so the rest of the tab draws below the buttons.
-        ImGui.SetCursorPos(new Vector2(ImGui.GetStyle().WindowPadding.X, topY));
     }
 
     private static void OpenUrl(string url)

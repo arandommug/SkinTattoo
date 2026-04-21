@@ -16,30 +16,6 @@ public partial class MainWindow
     // UV mesh wireframe toggle
     private bool showUvWireframe;
 
-    private void SyncCanvasMapModeFromSelectedLayer()
-    {
-        var group = project.SelectedGroup;
-        var gi = project.SelectedGroupIndex;
-        var li = group?.SelectedLayerIndex ?? -1;
-        var layer = group?.SelectedLayer;
-        var target = layer?.TargetMap ?? TargetMap.Diffuse;
-
-        if (gi == lastCanvasSyncGroupIndex
-            && li == lastCanvasSyncLayerIndex
-            && target == lastCanvasSyncLayerTargetMap)
-            return;
-
-        lastCanvasSyncGroupIndex = gi;
-        lastCanvasSyncLayerIndex = li;
-        lastCanvasSyncLayerTargetMap = target;
-
-        if (layer != null && CanvasMapMode != target)
-        {
-            CanvasMapMode = target;
-            SaveCanvasViewSettings();
-        }
-    }
-
     private static string? GuessMaskPathFromSibling(string? texPath)
     {
         if (string.IsNullOrEmpty(texPath)) return null;
@@ -87,8 +63,6 @@ public partial class MainWindow
 
     private void DrawCanvas()
     {
-        SyncCanvasMapModeFromSelectedLayer();
-
         var btnH = ImGui.GetFrameHeight();
         ImGui.AlignTextToFramePadding();
         ImGui.Text(Strings.T("label.uv_scale"));
@@ -100,9 +74,7 @@ public partial class MainWindow
         var spacing = ImGui.GetStyle().ItemSpacing.X;
         var hasMesh = previewService.CurrentMesh != null;
 
-        // Reserve space for buttons on the right
-        var rightBtns = fitBtnW + uvMeshBtnW + spacing * 2
-                        + (showUvWireframe ? colorBtnW + spacing : 0);
+        var rightBtns = fitBtnW + uvMeshBtnW + colorBtnW + spacing * 3;
         var sliderW = ImGui.GetContentRegionAvail().X - rightBtns;
         ImGui.SetNextItemWidth(sliderW);
         ImGui.SliderFloat("##zoom", ref canvasZoom, 0.1f, 5.0f, $"{canvasZoom * 100:F0}%%");
@@ -131,32 +103,25 @@ public partial class MainWindow
                 ImGui.SetTooltip(showUvWireframe ? Strings.T("tooltip.uv_mesh_hide") : Strings.T("tooltip.uv_mesh_show"));
         }
 
-        if (showUvWireframe)
-        {
-            ImGui.SameLine();
-            var wc = new Vector4(config.UvWireframeColorR, config.UvWireframeColorG,
-                config.UvWireframeColorB, config.UvWireframeColorA);
-            if (ImGui.ColorButton("##wireColor", wc, ImGuiColorEditFlags.AlphaPreview, new Vector2(colorBtnW, btnH)))
-                ImGui.OpenPopup("##wireColorPicker");
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip(Strings.T("tooltip.wire_color"));
-            if (ImGui.BeginPopup("##wireColorPicker"))
-            {
-                if (ImGui.ColorPicker4("##wcPick", ref wc, ImGuiColorEditFlags.AlphaBar))
-                {
-                    config.UvWireframeColorR = wc.X;
-                    config.UvWireframeColorG = wc.Y;
-                    config.UvWireframeColorB = wc.Z;
-                    config.UvWireframeColorA = wc.W;
-                }
-                if (ImGui.IsItemDeactivatedAfterEdit())
-                    config.Save();
-                ImGui.EndPopup();
-            }
-        }
-
-        ImGui.AlignTextToFramePadding();
-        ImGui.Text(Strings.T("label.canvas_map"));
         ImGui.SameLine();
+        var wc = new Vector4(config.UvWireframeColorR, config.UvWireframeColorG,
+            config.UvWireframeColorB, config.UvWireframeColorA);
+        if (ImGui.ColorButton("##wireColor", wc, ImGuiColorEditFlags.AlphaPreview, new Vector2(colorBtnW, btnH)))
+            ImGui.OpenPopup("##wireColorPicker");
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip(Strings.T("tooltip.wire_color"));
+        if (ImGui.BeginPopup("##wireColorPicker"))
+        {
+            if (ImGui.ColorPicker4("##wcPick", ref wc, ImGuiColorEditFlags.AlphaBar))
+            {
+                config.UvWireframeColorR = wc.X;
+                config.UvWireframeColorG = wc.Y;
+                config.UvWireframeColorB = wc.Z;
+                config.UvWireframeColorA = wc.W;
+            }
+            if (ImGui.IsItemDeactivatedAfterEdit())
+                config.Save();
+            ImGui.EndPopup();
+        }
 
         var mapMode = CanvasMapMode;
         ImGui.SetNextItemWidth(100f);
@@ -241,7 +206,9 @@ public partial class MainWindow
 
         DrawRulers(drawList, canvasPos, canvasSize, texScreenOrigin, texScreenSize);
 
-        if (!hasBaseTexture)
+        // Only show "base map missing" when the user WANTS the base shown (not when they
+        // disabled it intentionally via the "Show Base" checkbox).
+        if (!hasBaseTexture && showCanvasBaseTexture)
         {
             var missingText = Strings.T("hint.canvas_map_base_missing");
             var missingSize = ImGui.CalcTextSize(missingText);
@@ -535,12 +502,15 @@ public partial class MainWindow
 
         for (var i = 0; i < group.Layers.Count; i++)
         {
-            if (previewCurrentLayerOnly && i != group.SelectedLayerIndex)
+            bool isCurrent = i == group.SelectedLayerIndex;
+            if (previewCurrentLayerOnly && !isCurrent)
                 continue;
 
             var layer = group.Layers[i];
             if (!layer.IsVisible || string.IsNullOrEmpty(layer.ImagePath)) continue;
-            if (layer.TargetMap != CanvasMapMode) continue;
+            // "Current Layer Only" bypasses TargetMap filter -- the user explicitly asked
+            // to see this layer's placement, regardless of which map the canvas is showing.
+            if (!previewCurrentLayerOnly && layer.TargetMap != CanvasMapMode) continue;
 
             var isSelected = group.SelectedLayerIndex == i;
 

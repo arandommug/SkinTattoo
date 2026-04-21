@@ -41,6 +41,9 @@ internal static class UiHelpers
 
     public static void DrawInfoIcon()
     {
+        // Align with adjacent frame widgets (Checkbox / Button) so the icon sits on the
+        // text baseline instead of hugging the top of the line.
+        ImGui.AlignTextToFramePadding();
         ImGui.PushFont(UiBuilder.IconFont);
         ImGui.TextDisabled(FontAwesomeIcon.InfoCircle.ToIconString());
         ImGui.PopFont();
@@ -56,4 +59,32 @@ internal static class UiHelpers
         ImGui.PopTextWrapPos();
         ImGui.EndTooltip();
     }
+
+    // Square icon button with explicit size, so layouts can predict exact width.
+    // Default size = current frame height, matching surrounding form controls.
+    // Icon is drawn manually via drawList so it lands on the geometric centre of the
+    // button regardless of glyph asymmetry (ImGui.Button + ButtonTextAlign relies on
+    // the glyph's bbox which is uneven for many FontAwesome icons).
+    public static bool SquareIconButton(int id, FontAwesomeIcon icon, float size)
+    {
+        var startPos = ImGui.GetCursorScreenPos();
+        var btnSize = new System.Numerics.Vector2(size, size);
+        var clicked = ImGui.Button($"##sq{id}", btnSize);
+
+        ImGui.PushFont(UiBuilder.IconFont);
+        var iconStr = icon.ToIconString();
+        var iconSize = ImGui.CalcTextSize(iconStr);
+        var iconPos = new System.Numerics.Vector2(
+            startPos.X + (size - iconSize.X) * 0.5f,
+            startPos.Y + (size - iconSize.Y) * 0.5f);
+        ImGui.GetWindowDrawList().AddText(iconPos, ImGui.GetColorU32(ImGuiCol.Text), iconStr);
+        ImGui.PopFont();
+        return clicked;
+    }
+
+    public static bool SquareIconButton(int id, FontAwesomeIcon icon)
+        => SquareIconButton(id, icon, ImGui.GetFrameHeight());
+
+    public static bool SquareIconButton(string id, FontAwesomeIcon icon)
+        => SquareIconButton(id.GetHashCode(), icon, ImGui.GetFrameHeight());
 }

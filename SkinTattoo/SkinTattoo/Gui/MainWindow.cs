@@ -50,9 +50,6 @@ public partial class MainWindow : Window, IDisposable
     private bool canvasScalingLayer;
     private bool previewCurrentLayerOnly;
     private bool showCanvasBaseTexture = true;
-    private int lastCanvasSyncGroupIndex = -1;
-    private int lastCanvasSyncLayerIndex = -1;
-    private TargetMap lastCanvasSyncLayerTargetMap = TargetMap.Diffuse;
     public TargetMap CanvasMapMode { get; private set; } = TargetMap.Diffuse;
 
     // Cached base texture size
@@ -85,6 +82,7 @@ public partial class MainWindow : Window, IDisposable
     private List<DecalLayer>? copiedGroupLayers;
     private int copiedGroupSelectedLayerIndex = -1;
     private float copiedGroupSrcAspect;
+    private TargetGroup? copiedGroupSource;
 
     // Init phase
     private enum InitPhase { Pending, Loading, Done }
@@ -555,7 +553,7 @@ public partial class MainWindow : Window, IDisposable
 
     private void DrawToolbar()
     {
-        if (ImGuiComponents.IconButton(10, FontAwesomeIcon.Cube))
+        if (UiHelpers.SquareIconButton(10, FontAwesomeIcon.Cube))
         {
             if (ModelEditorWindowRef != null)
                 ModelEditorWindowRef.IsOpen = !ModelEditorWindowRef.IsOpen;
@@ -565,13 +563,13 @@ public partial class MainWindow : Window, IDisposable
         ImGui.SameLine();
         using (ImRaii.Disabled(project.SelectedLayer == null))
         {
-            if (ImGuiComponents.IconButton(2, FontAwesomeIcon.Undo))
+            if (UiHelpers.SquareIconButton(2, FontAwesomeIcon.Undo))
                 ResetSelectedLayer();
         }
         if (ImGui.IsItemHovered()) ImGui.SetTooltip(Strings.T("tooltip.reset_layer"));
 
         ImGui.SameLine();
-        if (ImGuiComponents.IconButton(3, FontAwesomeIcon.Eraser))
+        if (UiHelpers.SquareIconButton(3, FontAwesomeIcon.Eraser))
         {
             penumbra.ClearRedirect();
             penumbra.RedrawPlayer();
@@ -586,7 +584,7 @@ public partial class MainWindow : Window, IDisposable
             var grp = project.SelectedGroup;
             using (ImRaii.Disabled(grp == null || string.IsNullOrEmpty(grp?.DiffuseGamePath)))
             {
-                if (ImGuiComponents.IconButton(40, FontAwesomeIcon.Image))
+                if (UiHelpers.SquareIconButton(40, FontAwesomeIcon.Image))
                     ExportBaseTexture(grp!);
             }
             if (ImGui.IsItemHovered()) ImGui.SetTooltip(Strings.T("tooltip.export_base_tex"));
@@ -594,7 +592,7 @@ public partial class MainWindow : Window, IDisposable
             ImGui.SameLine();
             using (ImRaii.Disabled(grp == null || previewService.CurrentMesh == null))
             {
-                if (ImGuiComponents.IconButton(41, FontAwesomeIcon.BorderAll))
+                if (UiHelpers.SquareIconButton(41, FontAwesomeIcon.BorderAll))
                     ExportUvWireframe(grp!);
             }
             if (ImGui.IsItemHovered()) ImGui.SetTooltip(Strings.T("tooltip.export_uv_wireframe"));
@@ -603,7 +601,7 @@ public partial class MainWindow : Window, IDisposable
         ImGui.SameLine();
         using (ImRaii.Disabled(project.Groups.Count == 0))
         {
-            if (ImGuiComponents.IconButton(7, FontAwesomeIcon.FileExport))
+            if (UiHelpers.SquareIconButton(7, FontAwesomeIcon.FileExport))
                 ModExportWindowRef?.OpenAs(Core.ExportTarget.LocalPmp);
         }
         if (ImGui.IsItemHovered()) ImGui.SetTooltip(Strings.T("tooltip.export_local"));
@@ -611,7 +609,7 @@ public partial class MainWindow : Window, IDisposable
         ImGui.SameLine();
         using (ImRaii.Disabled(project.Groups.Count == 0 || !penumbra.IsAvailable))
         {
-            if (ImGuiComponents.IconButton(8, FontAwesomeIcon.Download))
+            if (UiHelpers.SquareIconButton(8, FontAwesomeIcon.Download))
                 ModExportWindowRef?.OpenAs(Core.ExportTarget.InstallToPenumbra);
         }
         if (ImGui.IsItemHovered())
@@ -623,7 +621,7 @@ public partial class MainWindow : Window, IDisposable
         if (group != null && (!string.IsNullOrEmpty(group.MeshGamePath) || group.AllMeshPaths.Count > 0))
         {
             var meshIcon = previewService.CurrentMesh == null ? FontAwesomeIcon.Cube : FontAwesomeIcon.SyncAlt;
-            if (ImGuiComponents.IconButton(4, meshIcon))
+            if (UiHelpers.SquareIconButton(4, meshIcon))
             {
                 ReloadGroupMesh(group);
                 previewService.NotifyMeshChanged();
@@ -635,7 +633,7 @@ public partial class MainWindow : Window, IDisposable
 
         using (ImRaii.Disabled(!penumbra.IsAvailable))
         {
-            if (ImGuiComponents.IconButton(7, FontAwesomeIcon.Redo))
+            if (UiHelpers.SquareIconButton(7, FontAwesomeIcon.Redo))
             {
                 previewService.ClearTextureCache();
                 previewService.ResetSwapState();
@@ -662,7 +660,7 @@ public partial class MainWindow : Window, IDisposable
             var hasTarget = project.SelectedGroup != null && !string.IsNullOrEmpty(project.SelectedGroup.DiffuseGamePath);
             using (ImRaii.Disabled(!hasTarget))
             {
-                if (ImGuiComponents.IconButton(5, FontAwesomeIcon.SyncAlt))
+                if (UiHelpers.SquareIconButton(5, FontAwesomeIcon.SyncAlt))
                     TriggerPreview();
             }
             if (ImGui.IsItemHovered()) ImGui.SetTooltip(Strings.T("tooltip.update_preview"));
@@ -676,14 +674,15 @@ public partial class MainWindow : Window, IDisposable
     {
         const float splitterWidth = 6f;
         const float minPanelWidth = 140f;
+        const float minLeftPanelWidth = 280f;
         const float hoverExtend = 5f;
         const float hoverDelay = 0.1f;
 
-        if (leftPanelWidth < 0) leftPanelWidth = totalWidth * 0.20f;
+        if (leftPanelWidth < 0) leftPanelWidth = MathF.Max(minLeftPanelWidth, totalWidth * 0.22f);
 
         var maxLeft = totalWidth - rightPanelWidth - minPanelWidth - splitterWidth * 2;
         var maxRight = totalWidth - leftPanelWidth - minPanelWidth - splitterWidth * 2;
-        leftPanelWidth = Math.Clamp(leftPanelWidth, minPanelWidth, Math.Max(minPanelWidth, maxLeft));
+        leftPanelWidth = Math.Clamp(leftPanelWidth, minLeftPanelWidth, Math.Max(minLeftPanelWidth, maxLeft));
         rightPanelWidth = Math.Clamp(rightPanelWidth, minPanelWidth, Math.Max(minPanelWidth, maxRight));
         var centerWidth = Math.Max(minPanelWidth, totalWidth - leftPanelWidth - rightPanelWidth - splitterWidth * 2);
 
@@ -706,7 +705,7 @@ public partial class MainWindow : Window, IDisposable
             var sizeRight = totalWidth - leftPanelWidth - splitterWidth;
             var minRight = rightPanelWidth + minPanelWidth + splitterWidth;
             using var color = ImRaii.PushColor(ImGuiCol.Separator, 0u);
-            if (ImGuiP.SplitterBehavior(rect, id, ImGuiAxis.X, &sizeLeft, &sizeRight, minPanelWidth, minRight, hoverExtend, hoverDelay, 0))
+            if (ImGuiP.SplitterBehavior(rect, id, ImGuiAxis.X, &sizeLeft, &sizeRight, minLeftPanelWidth, minRight, hoverExtend, hoverDelay, 0))
                 leftPanelWidth = sizeLeft;
         }
 
@@ -730,7 +729,9 @@ public partial class MainWindow : Window, IDisposable
             var sizeRight = rightPanelWidth;
             var minLeft = leftPanelWidth + splitterWidth + minPanelWidth;
             using var color = ImRaii.PushColor(ImGuiCol.Separator, 0u);
-            if (ImGuiP.SplitterBehavior(rect, id, ImGuiAxis.X, &sizeLeft, &sizeRight, minLeft, minPanelWidth, hoverExtend, hoverDelay, 0))
+            // minLeftPanelWidth + splitter + minPanelWidth (center) ensures left+center stay above their mins.
+            var minLeftCombined = minLeftPanelWidth + splitterWidth + minPanelWidth;
+            if (ImGuiP.SplitterBehavior(rect, id, ImGuiAxis.X, &sizeLeft, &sizeRight, MathF.Max(minLeft, minLeftCombined), minPanelWidth, hoverExtend, hoverDelay, 0))
                 rightPanelWidth = sizeRight;
         }
 
