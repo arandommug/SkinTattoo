@@ -26,21 +26,7 @@
       "title": "3D Editor"
     },
     "library": {
-      "title": "Decal Library"
-    }
-  },
-  "library": {
-    "search_hint": "Search filename...",
-    "empty": "Library is empty. Click the button in the top-left to import.",
-    "loading": "Loading",
-    "delete_prompt": "Delete \"{0}\"?\nLayers using this resource will not be cleared automatically.",
-    "tooltip": {
-      "import": "Import new resource",
-      "used_count": "Used: {0}"
-    },
-    "menu": {
-      "apply": "Apply to current layer",
-      "delete": "Remove from library"
+      "title": "Layer Library"
     }
   },
   "tab": {
@@ -51,6 +37,45 @@
   },
   "changelog": {
     "empty": "No changelog entries available."
+  },
+  "library": {
+    "search_hint": "Search filename...",
+    "empty": "Library is empty. Click the button in the top-left to import.",
+    "loading": "Loading",
+    "na": "N/A",
+    "view": {
+      "label": "View",
+      "large": "Large",
+      "medium": "Medium",
+      "small": "Small",
+      "detail": "Detail"
+    },
+    "detail": {
+      "name": "Name",
+      "type": "Type",
+      "folder_type": "Folder",
+      "size": "Size",
+      "added": "Added"
+    },
+    "folder": {
+      "all": "All",
+      "name_hint": "Folder name"
+    },
+    "import_folder_hint": "Folder path...",
+    "import_folder_button": "Import Folder",
+    "import_folder_result": "Imported {0} image(s).",
+    "delete_prompt": "Delete \"{0}\"?\nLayers using this resource will not be cleared automatically.",
+    "tooltip": {
+      "import": "Import new resource",
+      "import_folder": "Import folder",
+      "create_folder": "Create folder",
+      "up_folder": "Go to parent folder",
+      "used_count": "Used: {0}"
+    },
+    "menu": {
+      "apply": "Apply to current layer",
+      "delete": "Remove from library"
+    }
   },
   "button": {
     "add": "Add",
@@ -76,21 +101,21 @@
     "multi_select": "Enter Multi-Select",
     "exit_multi_select": "Exit Multi-Select",
     "copy": "Copy",
-    "rotate_ccw_90": "CCW 90deg",
-    "rotate_cw_90": "CW 90deg",
+    "rotate_ccw_90": "CCW 90°",
+    "rotate_cw_90": "CW 90°",
     "mirror_x": "Mirror X",
     "mirror_y": "Mirror Y",
     "path": "Paths",
     "remove": "Remove",
     "save_mod": "Save Mod",
     "browse_output": "Browse...",
-    "confirm": "Confirm",
-    "cancel": "Cancel",
     "browse_image": "Browse File",
     "open_library": "Library"
+    ,"confirm": "Confirm"
+    ,"cancel": "Cancel"
   },
   "tooltip": {
-    "editor3d": "3D Decal Editor",
+    "editor3d": "3D Layer Editor",
     "reset_layer": "Reset current layer parameters",
     "clear_redirect": "Restore textures  --  clear Penumbra redirect",
     "export_base_tex": "Export base texture PNG (for external editing)",
@@ -104,10 +129,10 @@
     "auto_preview": "Auto-update in-game preview on parameter change",
     "update_preview": "Update preview",
     "add_group": "Add target material",
-    "delete_group": "Hold Ctrl+Shift to delete decal group",
-    "add_layer": "Add decal layer",
+    "delete_group": "Hold Ctrl+Shift to delete layer group",
+    "add_layer": "Add layer",
     "delete_layer": "Hold Ctrl+Shift to delete layer",
-    "highlight_on": "Highlight decal",
+    "highlight_on": "Highlight layer",
     "highlight_off": "Disable highlight",
     "canvas_zoom": "Canvas zoom (scroll wheel)",
     "uv_mesh_no_model": "Import a model first to show UV mesh",
@@ -133,7 +158,10 @@
     "show_hide_model": "Show/Hide",
     "re_resolve_tip": "Re-detect current character equipment/mod state and refresh mesh",
     "browse_image": "Browse...",
-    "open_library": "Open decal library"
+    "preview_current_layer": "Show only the selected layer in preview overlays; disable to show cumulative layers.",
+    "canvas_map": "Which game texture map to display in the editor preview.\nDiffuse — color/albedo\nNormal — bump/normal map\nMask — material mask (spec/roughness)",
+    "canvas_show_base": "Show/hide the selected map's base texture behind overlays",
+    "open_library": "Open layer library"
   },
   "label": {
     "diffuse": "Diffuse",
@@ -196,31 +224,38 @@
     "actual_path": "Actual Path",
     "tex_diffuse_header": "Texture (Diffuse)",
     "tex_normal_header": "Texture (Normal)",
-    "copy_clipboard": "Copy to Clipboard (markdown)"
+    "copy_clipboard": "Copy to Clipboard (markdown)",
+    "canvas_map": "Preview Map"
   },
   "section": {
-    "image": "Decal Image",
+    "image": "Layer Image",
     "transform": "UV Position",
     "render": "Render",
-    "pbr": "Decal Properties",
+    "pbr": "Layer Properties",
     "fade": "Layer Falloff"
   },
   "checkbox": {
     "enable_plugin": "Enable SkinTattoo",
-    "show_decal": "Show Decal",
+    "show_decal": "Show Layer",
     "emissive": "Emissive",
     "auto_preview": "Auto Preview",
     "uv_aa": "Anti-aliasing##uvAA",
     "uv_cull": "Viewport Culling##uvCull",
     "uv_dedup": "Shared Edge Dedup##uvDedup",
-    "http_enable": "Enable HTTP Server##httpEn"
+    "http_enable": "Enable HTTP Server##httpEn",
+    "preview_current_layer": "Current Layer Only",
+    "canvas_show_base": "Show Base"
   },
   "menu": {
     "copy_diffuse_path": "Copy Diffuse Path",
     "copy_normal_path": "Copy Normal Path",
     "copy_material_path": "Copy Material Path",
-    "copy_decal_group": "Copy Decal Group",
-    "paste_decal_group": "Paste Decal Group",
+    "copy_decal_group": "Copy Layer Group",
+    "paste_decal_group": "Paste Layer Group",
+    "duplicate_layer": "Duplicate Layer",
+    "highlight_on": "Highlight Layer",
+    "highlight_off": "Disable Highlight",
+    "delete_layer": "Delete Layer",
     "copy_game_path": "Copy Game Path",
     "copy_actual_path": "Copy Actual Path"
   },
@@ -236,20 +271,25 @@
     "linear": "Linear",
     "bidir": "Bidirectional"
   },
+  "canvas_map": {
+    "diffuse": "Diffuse",
+    "normal": "Normal",
+    "mask": "Mask"
+  },
   "target_map": {
     "label": "Target",
     "diffuse": "Diffuse",
     "mask": "Mask",
     "normal": "Normal",
-    "tooltip": "Which game texture the decal paints into.\nDiffuse -- color, default\nMask -- material mask, spec/roughness\nNormal -- normal map, bump detail",
-    "auto_normal_detected": "PNG looks like a normal map -- target set to Normal."
+    "tooltip": "Which game texture the layer paints into.\nDiffuse — color, default\nMask — material mask, spec/roughness\nNormal — normal map, bump detail",
+    "auto_normal_detected": "PNG looks like a normal map — target set to Normal."
   },
   "emissive_normal": {
-    "detected": "Detected emissive mask in Normal alpha -- glow controlled by this layer",
+    "detected": "Detected emissive mask in Normal alpha — glow controlled by this layer",
     "manual_enable_btn": "Enable glow",
     "manual_enable_tip": "Use the Normal map's alpha channel as the emissive mask",
     "disable_btn": "Disable glow",
-    "diffuse_locked": "Emissive controlled by a Normal layer -- disabled here"
+    "diffuse_locked": "Emissive controlled by a Normal layer — disabled here"
   },
   "enum": {
     "blendmode": {
@@ -296,7 +336,7 @@
   },
   "error": {
     "no_mod_name": "Please enter a Mod name",
-    "no_group_hint": "Add a decal group first",
+    "no_group_hint": "Add a layer group first",
     "no_layer_selected": "Select or add a layer",
     "no_group_selected": "Please select at least one layer group",
     "no_visible_layer": "No visible layers in selected groups",
@@ -313,32 +353,32 @@
     "uv_editor_modifiers": "UV Editor  -- Modifier Keys",
     "layer_target": "Layers and Targets",
     "editor3d_camera": "3D Editor  -- Camera",
-    "editor3d_decal": "3D Editor  -- Decal",
+    "editor3d_decal": "3D Editor  -- Layer",
     "editor3d_models": "3D Editor  -- Model Management",
     "canvas_scroll": "Scroll wheel: zoom canvas",
     "canvas_pan": "Middle-drag: pan canvas",
-    "canvas_move_decal": "Left-drag: move decal position",
-    "canvas_select": "Left-click empty area: select decal layer",
-    "canvas_scale": "Right-drag: scale decal",
+    "canvas_move_decal": "Left-drag: move layer position",
+    "canvas_select": "Left-click empty area: select layer",
+    "canvas_scale": "Right-drag: scale layer",
     "mod_shift": "Shift + Left-drag: lock X axis",
     "mod_ctrl": "Ctrl + Left-drag: lock Y axis",
-    "mod_alt": "Alt + Right-drag: rotate decal",
+    "mod_alt": "Alt + Right-drag: rotate layer",
     "delete_hint": "Ctrl+Shift + Delete button: delete layer/group",
     "context_menu": "Right-click group header: copy texture / normal / material path",
     "cam_rotate": "Right-drag: rotate camera",
     "cam_pan": "Middle-drag: pan camera",
     "cam_zoom": "Ctrl + Scroll: camera zoom",
     "cam_reset": "Reset Camera button: return to default view",
-    "decal_place": "Left-click model: place selected layer's decal at that position",
-    "decal_scale": "Scroll wheel: scale selected decal (non-Ctrl)",
+    "decal_place": "Left-click model: place selected layer at that position",
+    "decal_scale": "Scroll wheel: scale selected layer (non-Ctrl)",
     "model_add": "Add Model: append extra model from player resource tree",
     "model_manage": "Manage Models: toggle visibility / remove added models"
   },
   "hint": {
-    "canvas_ops": "LMB: move decal  RMB: scale decal  MMB: pan canvas  Scroll: zoom canvas",
-    "canvas_mods": "Shift: lock X  Ctrl: lock Y  Alt+RMB: rotate",
-    "viewport_ops": "LMB: place decal  RMB: rotate camera  MMB: pan camera",
-    "viewport_scroll": "Scroll: scale decal  Ctrl+Scroll: zoom camera",
+    "canvas_ops": "LMB: move layer  RMB: scale layer  MMB: pan canvas  Scroll: zoom canvas",
+    "canvas_mods": "Shift: lock X  Ctrl: lock Y  Alt+RMB: rotate layer",
+    "viewport_ops": "LMB: place layer  RMB: rotate camera  MMB: pan camera",
+    "viewport_scroll": "Scroll: scale layer  Ctrl+Scroll: zoom camera",
     "loading": "Loading...",
     "loading_sub": "Loading models and decals, please wait",
     "char_redrawing": "Character redrawing...",
@@ -349,17 +389,18 @@
     "model_list": "Model list:",
     "empty_group_list": "Click + to add target material",
     "no_layer_groups": "(No layer groups in project)",
-    "layer_group_fmt": "{0} ({1} layers)"
+    "layer_group_fmt": "{0} ({1} layers)",
+    "canvas_map_base_missing": "Base map not found for this target. Showing overlays only."
   },
   "dialog": {
-    "select_image": "Select Decal Image",
+    "select_image": "Select Layer Image",
     "export_base_tex": "Export Base Texture",
     "export_wireframe": "Export UV Wireframe",
     "save_mod": "Save Mod"
   },
   "layer": {
     "default": {
-      "name": "Decal {0}"
+      "name": "Layer {0}"
     }
   },
   "tooltip_group": {

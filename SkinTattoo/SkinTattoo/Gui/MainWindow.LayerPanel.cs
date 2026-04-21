@@ -126,7 +126,12 @@ public partial class MainWindow
         // Group name
         ImGui.SameLine();
         ImGui.SetCursorPosY(ImGui.GetCursorPosY() + 2);
-        var nameWidth = availWidth - (ImGui.GetCursorScreenPos().X - headerStart.X) - 8;
+        var headerPad = 6f;
+        var layerCountText = $"({group.Layers.Count})";
+        var layerCountWidth = ImGui.CalcTextSize(layerCountText).X;
+        var headerAddBtnSize = ImGui.GetFrameHeight();
+        var headerClusterWidth = layerCountWidth + ImGui.GetStyle().ItemSpacing.X + headerAddBtnSize;
+        var nameWidth = availWidth - (ImGui.GetCursorScreenPos().X - headerStart.X) - headerClusterWidth - (headerPad * 2f);
         if (nameWidth < 20) nameWidth = 20;
         if (ImGui.Selectable($"{group.Name}##grpHdr", false, ImGuiSelectableFlags.None,
             new Vector2(nameWidth, ImGui.GetTextLineHeight())))
@@ -134,6 +139,24 @@ public partial class MainWindow
             project.SelectedGroupIndex = gi;
             group.SelectedLayerIndex = -1;
         }
+
+        // Header-right: layer count + add layer button
+        var headerRightX = headerStart.X + availWidth - headerClusterWidth - headerPad;
+        ImGui.SetCursorScreenPos(new Vector2(headerRightX, headerStart.Y + 2f));
+        ImGui.AlignTextToFramePadding();
+        ImGui.TextDisabled(layerCountText);
+        ImGui.SameLine();
+        if (ImGuiComponents.IconButton(20, FontAwesomeIcon.Plus))
+        {
+            project.SelectedGroupIndex = gi;
+            layerCounter++;
+            var newLayer = group.AddLayer(Strings.T("layer.default.name", layerCounter));
+            var (tw, th) = previewService.GetBaseTextureSize(group);
+            float texAspect = (tw > 0 && th > 0) ? (float)tw / th : 1f;
+            newLayer.UvScale = new Vector2(newLayer.UvScale.X, newLayer.UvScale.X * texAspect);
+            SyncImagePathBuf();
+        }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip(Strings.T("tooltip.add_layer"));
 
         // Tooltip
         if (ImGui.IsItemHovered())
@@ -191,156 +214,276 @@ public partial class MainWindow
 
         ImGui.Indent(6);
 
-        // Layer toolbar
-        if (ImGuiComponents.IconButton(20, FontAwesomeIcon.Plus))
-        {
-            project.SelectedGroupIndex = gi;
-            layerCounter++;
-            var newLayer = group.AddLayer(Strings.T("layer.default.name", layerCounter));
-            // Correct initial UvScale for texture aspect ratio so the decal
-            // starts as a square in pixel space (e.g., 1024x2048 -> aspect 0.5).
-            var (tw, th) = previewService.GetBaseTextureSize(group);
-            float texAspect = (tw > 0 && th > 0) ? (float)tw / th : 1f;
-            newLayer.UvScale = new Vector2(newLayer.UvScale.X, newLayer.UvScale.X * texAspect);
-            // New layer's ImagePath defaults to null; reset the UI buf
-            // immediately so the input field doesn't display stale text
-            // from the previously-selected layer (across groups too).
-            SyncImagePathBuf();
-        }
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip(Strings.T("tooltip.add_layer"));
-
-        ImGui.SameLine();
-        var io2 = ImGui.GetIO();
-        var canDeleteLayer = isGroupSelected && group.SelectedLayerIndex >= 0
-                             && io2.KeyCtrl && io2.KeyShift;
-        using (ImRaii.Disabled(!canDeleteLayer))
-        {
-            if (ImGuiComponents.IconButton(21, FontAwesomeIcon.Trash))
-            {
-                var idx = group.SelectedLayerIndex;
-                if (idx >= 0 && idx < group.Layers.Count)
-                {
-                    var doomed = group.Layers[idx];
-                    if (doomed.AffectsEmissive || doomed.RequiresRowPair)
-                        previewService.InvalidateEmissiveForGroup(group);
-                    previewService.ForceReleaseRowPair(group, doomed);
-                }
-                group.RemoveLayer(idx);
-                MarkPreviewDirty(immediate: true);
-            }
-        }
-        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-            ImGui.SetTooltip(Strings.T("tooltip.delete_layer"));
-
-        ImGui.SameLine();
-        using (ImRaii.Disabled(!isGroupSelected || group.SelectedLayerIndex <= 0))
-        {
-            if (ImGuiComponents.IconButton(22, FontAwesomeIcon.ArrowUp))
-            {
-                group.MoveLayerUp(group.SelectedLayerIndex);
-                SyncImagePathBuf();
-                MarkPreviewDirty();
-            }
-        }
-
-        ImGui.SameLine();
-        using (ImRaii.Disabled(!isGroupSelected || group.SelectedLayerIndex < 0 || group.SelectedLayerIndex >= group.Layers.Count - 1))
-        {
-            if (ImGuiComponents.IconButton(23, FontAwesomeIcon.ArrowDown))
-            {
-                group.MoveLayerDown(group.SelectedLayerIndex);
-                SyncImagePathBuf();
-                MarkPreviewDirty();
-            }
-        }
-
-        ImGui.SameLine();
-        ImGui.TextDisabled($"({group.Layers.Count})");
-
         // Layer rows
-        for (var li = 0; li < group.Layers.Count; li++)
+        var deleteLayerIndex = -1;
+        var duplicateLayerIndex = -1;
+        //for (var li = 0; li < group.Layers.Count; li++)
+        //{
+        //    var layer = group.Layers[li];
+        //    ImGui.PushID(li + 1000);
+
+        //    var isLayerSelected = isGroupSelected && group.SelectedLayerIndex == li;
+        //    var canHighlight = !string.IsNullOrEmpty(layer.ImagePath) && !string.IsNullOrEmpty(group.MtrlGamePath);
+        //    var isThisHighlighted = highlightActive && highlightGroupIndex == gi && highlightLayerIndex == li;
+
+        //    if (isLayerSelected)
+        //    {
+        //        var rowPos = ImGui.GetCursorScreenPos();
+        //        drawList.AddRectFilled(
+        //            rowPos - new Vector2(2, 1),
+        //            rowPos + new Vector2(ImGui.GetContentRegionAvail().X, ImGui.GetFrameHeight()),
+        //            ImGui.GetColorU32(new Vector4(0.24f, 0.42f, 0.65f, 0.5f)), 3f);
+        //    }
+
+        //    // Visibility toggle
+        //    var visIcon = layer.IsVisible ? FontAwesomeIcon.Eye : FontAwesomeIcon.EyeSlash;
+        //    var visColor = layer.IsVisible ? new Vector4(1, 1, 1, 1) : new Vector4(0.5f, 0.5f, 0.5f, 1);
+        //    ImGui.PushStyleColor(ImGuiCol.Text, visColor);
+        //    if (ImGuiComponents.IconButton(100 + li, visIcon))
+        //    {
+        //        layer.IsVisible = !layer.IsVisible;
+        //        // Force a Full Redraw so the toggle also propagates to materials that
+        //        // live in a different TargetGroup but share this group's texture state.
+        //        // Inplace GPU swap only covers the current group and misses those cases.
+        //        if (layer.AffectsEmissive || layer.RequiresRowPair)
+        //            previewService.InvalidateEmissiveForGroup(group);
+        //        previewService.ForceFullRedrawNextCycle();
+        //        MarkPreviewDirty(immediate: true);
+        //    }
+        //    ImGui.PopStyleColor();
+
+        //    ImGui.SameLine();
+
+        //    var rowStart = ImGui.GetCursorScreenPos();
+        //    var rowAvailWidth = ImGui.GetContentRegionAvail().X;
+        //    var buttonSize = ImGui.GetFrameHeight();
+        //    var buttonGap = ImGui.GetStyle().ItemSpacing.X;
+
+        //    int controlCount = 0;
+        //    if (isLayerSelected)
+        //    {
+        //        if (li > 0) controlCount++;
+        //        if (li < group.Layers.Count - 1) controlCount++;
+        //        controlCount++; // ellipsis
+        //    }
+
+        //    var controlsWidth = controlCount > 0
+        //        ? controlCount * buttonSize + controlCount * buttonGap
+        //        : 0f;
+
+        //    var totalAvail = ImGui.GetContentRegionAvail().X;
+        //    var selectableWidth = totalAvail - controlsWidth - (controlCount > 0 ? 8f : 0f);
+
+        //    if (ImGui.Selectable(layer.Name, isLayerSelected, ImGuiSelectableFlags.None, new Vector2(selectableWidth, 0f)))
+        //    {
+        //        project.SelectedGroupIndex = gi;
+        //        group.SelectedLayerIndex = li;
+        //        SyncImagePathBuf();
+        //    }
+
+        //    if (isLayerSelected)
+        //    {
+        //        var controlsStartX = rowStart.X + totalAvail - controlsWidth;
+        //        float cursorX = controlsStartX;
+        //        float controlsY = rowStart.Y;
+
+        //        if (li > 0)
+        //        {
+        //            ImGui.SetCursorScreenPos(new Vector2(cursorX, controlsY));
+        //            if (ImGuiComponents.IconButton(220 + li, FontAwesomeIcon.ArrowUp))
+        //            {
+        //                group.MoveLayerUp(li);
+        //                SyncImagePathBuf();
+        //                MarkPreviewDirty();
+        //            }
+        //            cursorX += buttonSize + buttonGap;
+        //        }
+
+        //        if (li < group.Layers.Count - 1)
+        //        {
+        //            ImGui.SetCursorScreenPos(new Vector2(cursorX, controlsY));
+        //            if (ImGuiComponents.IconButton(240 + li, FontAwesomeIcon.ArrowDown))
+        //            {
+        //                group.MoveLayerDown(li);
+        //                SyncImagePathBuf();
+        //                MarkPreviewDirty();
+        //            }
+        //            cursorX += buttonSize + buttonGap;
+        //        }
+
+        //        ImGui.SetCursorScreenPos(new Vector2(cursorX, controlsY));
+        //        if (ImGuiComponents.IconButton(260 + li, FontAwesomeIcon.EllipsisV))
+        //            ImGui.OpenPopup("##LayerActions");
+
+        //        if (ImGui.BeginPopup("##LayerActions"))
+        //        {
+        //            if (ImGui.MenuItem(Strings.T("menu.duplicate_layer")))
+        //                duplicateLayerIndex = li;
+
+        //            using (ImRaii.Disabled(!canHighlight))
+        //            {
+        //                if (ImGui.MenuItem(isThisHighlighted ? Strings.T("menu.highlight_off") : Strings.T("menu.highlight_on")))
+        //                    ToggleLayerHighlight(group, gi, li, isThisHighlighted);
+        //            }
+
+        //            var io = ImGui.GetIO();
+        //            var canDelete = io.KeyCtrl && io.KeyShift;
+        //            using (ImRaii.Disabled(!canDelete))
+        //            {
+        //                if (ImGui.MenuItem(Strings.T("menu.delete_layer")))
+        //                    deleteLayerIndex = li;
+        //            }
+
+        //            ImGui.EndPopup();
+        //        }
+
+        //        ImGui.SameLine();
+        //        ImGui.Dummy(new Vector2(buttonGap, 0f));
+        //    }
+
+        //    ImGui.PopID();
+        //}
+
+        ImGui.PushStyleVar(ImGuiStyleVar.CellPadding, new Vector2(6, 4)); // horizontal, vertical
+        ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(4, 3)); // fixes icon centering
+
+        if (ImGui.BeginTable("LayersTable", 4,
+            ImGuiTableFlags.RowBg |
+            ImGuiTableFlags.SizingStretchSame |
+            ImGuiTableFlags.BordersInnerV))
         {
-            var layer = group.Layers[li];
-            ImGui.PushID(li + 1000);
+            float buttonSize = ImGui.GetFrameHeight();
 
-            var isLayerSelected = isGroupSelected && group.SelectedLayerIndex == li;
+            ImGui.TableSetupColumn("Vis", ImGuiTableColumnFlags.WidthFixed, buttonSize+6f);
+            ImGui.TableSetupColumn("Name", ImGuiTableColumnFlags.WidthFixed); // auto/min content
+            ImGui.TableSetupColumn("Controls", ImGuiTableColumnFlags.WidthStretch);
+            ImGui.TableSetupColumn("Menu", ImGuiTableColumnFlags.WidthFixed, buttonSize+6f);
 
-            if (isLayerSelected)
+            for (int li = 0; li < group.Layers.Count; li++)
             {
-                var rowPos = ImGui.GetCursorScreenPos();
-                drawList.AddRectFilled(
-                    rowPos - new Vector2(2, 1),
-                    rowPos + new Vector2(availWidth - 10, ImGui.GetFrameHeight() + 1),
-                    ImGui.GetColorU32(new Vector4(0.24f, 0.42f, 0.65f, 0.5f)), 3f);
-            }
+                var layer = group.Layers[li];
+                ImGui.PushID(li + 1000);
 
-            // Visibility toggle
-            var visIcon = layer.IsVisible ? FontAwesomeIcon.Eye : FontAwesomeIcon.EyeSlash;
-            var visColor = layer.IsVisible ? new Vector4(1, 1, 1, 1) : new Vector4(0.5f, 0.5f, 0.5f, 1);
-            ImGui.PushStyleColor(ImGuiCol.Text, visColor);
-            if (ImGuiComponents.IconButton(100 + li, visIcon))
-            {
-                layer.IsVisible = !layer.IsVisible;
-                // Force a Full Redraw so the toggle also propagates to materials that
-                // live in a different TargetGroup but share this group's texture state.
-                // Inplace GPU swap only covers the current group and misses those cases.
-                if (layer.AffectsEmissive || layer.RequiresRowPair)
-                    previewService.InvalidateEmissiveForGroup(group);
-                previewService.ForceFullRedrawNextCycle();
-                MarkPreviewDirty(immediate: true);
-            }
-            ImGui.PopStyleColor();
+                bool isLayerSelected = isGroupSelected && group.SelectedLayerIndex == li;
+                bool canHighlight = !string.IsNullOrEmpty(layer.ImagePath) && !string.IsNullOrEmpty(group.MtrlGamePath);
+                bool isThisHighlighted = highlightActive && highlightGroupIndex == gi && highlightLayerIndex == li;
 
-            // Highlight button
-            if (!string.IsNullOrEmpty(layer.ImagePath) && !string.IsNullOrEmpty(group.MtrlGamePath))
-            {
+                ImGui.TableNextRow();
+
+                // --- COLUMN 1: VISIBILITY ---
+                ImGui.TableSetColumnIndex(0);
+
+                var visIcon = layer.IsVisible ? FontAwesomeIcon.Eye : FontAwesomeIcon.EyeSlash;
+                var visColor = layer.IsVisible ? new Vector4(1, 1, 1, 1) : new Vector4(0.5f, 0.5f, 0.5f, 1);
+
+                ImGui.PushStyleColor(ImGuiCol.Text, visColor);
+                if (ImGuiComponents.IconButton(100 + li, visIcon))
+                {
+                    layer.IsVisible = !layer.IsVisible;
+
+                    if (layer.AffectsEmissive || layer.RequiresRowPair)
+                        previewService.InvalidateEmissiveForGroup(group);
+
+                    previewService.ForceFullRedrawNextCycle();
+                    MarkPreviewDirty(immediate: true);
+                }
+                ImGui.PopStyleColor();
+
+                // --- COLUMN 2: NAME (selectable) ---
+                ImGui.TableSetColumnIndex(1);
+
+                if (ImGui.Selectable(layer.Name, isLayerSelected,
+                    ImGuiSelectableFlags.SpanAllColumns))
+                {
+                    project.SelectedGroupIndex = gi;
+                    group.SelectedLayerIndex = li;
+                    SyncImagePathBuf();
+                }
+                ImGui.SetItemAllowOverlap();
+
+                // --- COLUMN 3: MOVE BUTTONS (LEFT ALIGNED, STRETCH COLUMN) ---
+                ImGui.TableSetColumnIndex(2);
+
+                using (ImRaii.Disabled(li <= 0))
+                {
+                    if (ImGuiComponents.IconButton(220 + li, FontAwesomeIcon.ArrowUp))
+                    {
+                        group.MoveLayerUp(li);
+                        SyncImagePathBuf();
+                        MarkPreviewDirty();
+                    }
+                }
+
                 ImGui.SameLine();
-                var isThisHighlighted = highlightActive && highlightGroupIndex == gi && highlightLayerIndex == li;
-                if (isThisHighlighted)
+
+                using (ImRaii.Disabled(li >= group.Layers.Count - 1))
                 {
-                    var iconHue = (highlightFrameCounter % HighlightCycleSteps) / (float)HighlightCycleSteps;
-                    var ic = TextureSwapService.HsvToRgb(iconHue, 0.8f, 1f);
-                    ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(ic.X, ic.Y, ic.Z, 1f));
-                }
-                ImGuiComponents.IconButton(200 + li, FontAwesomeIcon.Crosshairs);
-                if (isThisHighlighted) ImGui.PopStyleColor();
-                if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip(isThisHighlighted ? Strings.T("tooltip.highlight_off") : Strings.T("tooltip.highlight_on"));
-                if (ImGui.IsItemClicked())
-                {
-                    if (isThisHighlighted)
+                    if (ImGuiComponents.IconButton(240 + li, FontAwesomeIcon.ArrowDown))
                     {
-                        highlightActive = false;
-                        highlightGroupIndex = -1;
-                        highlightLayerIndex = -1;
-                        highlightFrameCounter = 0;
-                        RestoreEmissiveAfterHighlight(group);
-                    }
-                    else
-                    {
-                        if (highlightActive && highlightGroupIndex >= 0 && highlightGroupIndex < project.Groups.Count)
-                            RestoreEmissiveAfterHighlight(project.Groups[highlightGroupIndex]);
-                        if (!previewService.HasEmissiveOffset(group.MtrlGamePath))
-                            previewService.EnsureEmissiveInitialized(group);
-                        highlightActive = true;
-                        highlightGroupIndex = gi;
-                        highlightLayerIndex = li;
-                        highlightFrameCounter = 0;
+                        group.MoveLayerDown(li);
+                        SyncImagePathBuf();
+                        MarkPreviewDirty();
                     }
                 }
+
+                // --- COLUMN 4: ELLIPSIS (RIGHT-ALIGNED FIXED) ---
+                ImGui.TableSetColumnIndex(3);
+
+                // right-align inside the column
+                ImGui.SetCursorPosX(
+                    ImGui.GetCursorPosX() +
+                    ImGui.GetColumnWidth() -
+                    ImGui.GetFrameHeight() -
+                    ImGui.GetStyle().CellPadding.X
+                );
+
+                if (ImGuiComponents.IconButton(260 + li, FontAwesomeIcon.EllipsisV))
+                {
+                    project.SelectedGroupIndex = gi;
+                    group.SelectedLayerIndex = li;
+                    SyncImagePathBuf();
+                    ImGui.OpenPopup("##LayerActions");
+                }
+
+                if (ImGui.BeginPopup("##LayerActions"))
+                {
+                    if (ImGui.MenuItem(Strings.T("menu.duplicate_layer")))
+                        duplicateLayerIndex = li;
+
+                    using (ImRaii.Disabled(!canHighlight))
+                    {
+                        if (ImGui.MenuItem(isThisHighlighted
+                            ? Strings.T("menu.highlight_off")
+                            : Strings.T("menu.highlight_on")))
+                        {
+                            ToggleLayerHighlight(group, gi, li, isThisHighlighted);
+                        }
+                    }
+
+                    var io = ImGui.GetIO();
+                    bool canDelete = io.KeyCtrl && io.KeyShift;
+
+                    using (ImRaii.Disabled(!canDelete))
+                    {
+                        if (ImGui.MenuItem(Strings.T("menu.delete_layer")))
+                            deleteLayerIndex = li;
+                    }
+
+                    ImGui.EndPopup();
+                }
+
+                ImGui.PopID();
             }
 
-            ImGui.SameLine();
-
-            if (ImGui.Selectable(layer.Name, isLayerSelected))
-            {
-                project.SelectedGroupIndex = gi;
-                group.SelectedLayerIndex = li;
-                SyncImagePathBuf();
-            }
-
-            ImGui.PopID();
+            ImGui.EndTable();
+            ImGui.PopStyleVar(2);
         }
+
+        if (duplicateLayerIndex >= 0 && duplicateLayerIndex < group.Layers.Count)
+            DuplicateLayer(group, duplicateLayerIndex);
+
+        if (deleteLayerIndex >= 0 && deleteLayerIndex < group.Layers.Count)
+            DeleteLayer(group, deleteLayerIndex);
 
         ImGui.Unindent(6);
         ImGui.Spacing();
@@ -369,6 +512,56 @@ public partial class MainWindow
 
         var (sw, sh) = previewService.GetBaseTextureSize(group);
         copiedGroupSrcAspect = (sw > 0 && sh > 0) ? (float)sw / sh : 0f;
+    }
+
+    private void DuplicateLayer(TargetGroup group, int index)
+    {
+        if (index < 0 || index >= group.Layers.Count)
+            return;
+
+        var clone = group.Layers[index].Clone();
+        group.Layers.Insert(index + 1, clone);
+        group.SelectedLayerIndex = index + 1;
+        SyncImagePathBuf();
+        MarkPreviewDirty();
+    }
+
+    private void DeleteLayer(TargetGroup group, int index)
+    {
+        if (index < 0 || index >= group.Layers.Count)
+            return;
+
+        var doomed = group.Layers[index];
+        if (doomed.AffectsEmissive || doomed.RequiresRowPair)
+            previewService.InvalidateEmissiveForGroup(group);
+        previewService.ForceReleaseRowPair(group, doomed);
+
+        group.RemoveLayer(index);
+        MarkPreviewDirty(immediate: true);
+    }
+
+    private void ToggleLayerHighlight(TargetGroup group, int groupIndex, int layerIndex, bool isThisHighlighted)
+    {
+        if (isThisHighlighted)
+        {
+            highlightActive = false;
+            highlightGroupIndex = -1;
+            highlightLayerIndex = -1;
+            highlightFrameCounter = 0;
+            RestoreEmissiveAfterHighlight(group);
+            return;
+        }
+
+        if (highlightActive && highlightGroupIndex >= 0 && highlightGroupIndex < project.Groups.Count)
+            RestoreEmissiveAfterHighlight(project.Groups[highlightGroupIndex]);
+
+        if (!previewService.HasEmissiveOffset(group.MtrlGamePath))
+            previewService.EnsureEmissiveInitialized(group);
+
+        highlightActive = true;
+        highlightGroupIndex = groupIndex;
+        highlightLayerIndex = layerIndex;
+        highlightFrameCounter = 0;
     }
 
     private void PasteDecalGroup(int targetGroupIndex)

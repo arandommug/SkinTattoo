@@ -76,6 +76,17 @@ public class PreviewService : IDisposable
         });
     }
 
+    public bool TryGetMaskGamePath(TargetGroup group, out string? maskGamePath)
+    {
+        maskGamePath = null;
+        if (string.IsNullOrEmpty(group.MtrlGamePath))
+            return false;
+
+        var mtrlDisk = group.OrigMtrlDiskPath ?? group.MtrlDiskPath;
+        maskGamePath = GetMaskGamePathFromMtrl(group.MtrlGamePath!, mtrlDisk);
+        return !string.IsNullOrEmpty(maskGamePath);
+    }
+
     /// <summary>Heuristic: filename hint (_n / _norm / "normal") plus RGB-clustering fallback.</summary>
     public bool IsLikelyNormalMap(string imagePath)
     {
@@ -209,11 +220,11 @@ public class PreviewService : IDisposable
     // main-thread consumption finishes well before the next compose runs. The Rgba/PreviewRgba
     // ones get stored in compositeResults for the 3D editor to read async; in the rare case
     // where the 3D editor reads while a new compose is mid-write, we get at most one frame
-    // of torn pixels which self-heals on the next compose (<=33ms). The previous double-buffer
+    // of torn pixels which self-heals on the next compose (≤33ms). The previous double-buffer
     // strategy doubled resident memory (600MB+ at 4096^2), unacceptable.
     /// <summary>
     /// Per-buffer dirty-rect state: tracks the previous cycle's layer-union so we can
-    /// compute `dirty = current_union  U  previous_union` and only repaint that region.
+    /// compute `dirty = current_union ∪ previous_union` and only repaint that region.
     /// </summary>
     private class DirtyTracker
     {
@@ -331,8 +342,75 @@ public class PreviewService : IDisposable
         return LoadBaseTexture(group);
     }
 
+    /// <summary>
+    /// Composites a single layer (by index) onto the group's base diffuse and returns the result.
+    /// Used by the 3D editor "Current Layer Only" preview toggle.
+    /// All layer types (Diffuse/Normal/Mask target) are shown via their image regardless of
+    /// AffectsDiffuse, so the user can see placement for any map type on the 3D model.
+    /// Returns null if the group has no base texture or the index is out of range.
+    /// </summary>
+    public (byte[] Data, int Width, int Height)? ComputeSingleLayerPreview(TargetGroup? group, int layerIndex)
+    {
+        if (group == null) return null;
+        if (layerIndex < 0 || layerIndex >= group.Layers.Count) return null;
+
+        var baseTex = LoadBaseTexture(group);
+        var (baseData, w, h) = (baseTex.Data, baseTex.Width, baseTex.Height);
+
+        var layer = group.Layers[layerIndex].Clone();
+        var singleList = new List<DecalLayer> { layer };
+        var result = CpuUvComposite(singleList, baseData, w, h, ignoreAffectsDiffuseFilter: true);
+        if (result == null)
+            return (baseData, w, h);
+
+        return (result, w, h);
+    }
+
     /// <summary>Last update mode used.</summary>
     public string LastUpdateMode { get; private set; } = "none";
+
+    /// <summary>
+    /// Loads the raw base texture for the given map type (Diffuse/Normal/Mask) for a group.
+    /// Falls back to diffuse if the requested map path is unavailable.
+    /// Returns null only if no texture can be resolved at all.
+    /// </summary>
+    public (byte[] Data, int Width, int Height)? TryGetBaseTextureForMap(TargetGroup? group, TargetMap map)
+    {
+        if (group == null) return null;
+
+        if (map == TargetMap.Normal)
+        {
+            var normDisk = group.OrigNormDiskPath ?? group.NormDiskPath;
+            var normGame = group.NormGamePath;
+            if (!string.IsNullOrEmpty(normDisk) || !string.IsNullOrEmpty(normGame))
+            {
+                var img = !string.IsNullOrEmpty(normDisk) && File.Exists(normDisk)
+                    ? imageLoader.LoadImage(normDisk)
+                    : (!string.IsNullOrEmpty(normGame) ? LoadGameTexture(normGame) : null);
+                if (img != null)
+                    return (img.Value.Data, img.Value.Width, img.Value.Height);
+            }
+        }
+        else if (map == TargetMap.Mask)
+        {
+            if (!string.IsNullOrEmpty(group.MtrlGamePath))
+            {
+                var mtrlDisk = group.OrigMtrlDiskPath ?? group.MtrlDiskPath;
+                var maskGamePath = GetMaskGamePathFromMtrl(group.MtrlGamePath!, mtrlDisk);
+                if (!string.IsNullOrEmpty(maskGamePath))
+                {
+                    var img = LoadGameTexture(maskGamePath!);
+                    if (img != null)
+                        return (img.Value.Data, img.Value.Width, img.Value.Height);
+                }
+            }
+        }
+
+        // Diffuse or fallback
+        return TryGetBaseTexture(group);
+    }
+
+
 
     /// <summary>Whether emissive CBuffer offset is known for a group's mtrl.</summary>
     public bool HasEmissiveOffset(string? mtrlGamePath)
@@ -493,7 +571,7 @@ public class PreviewService : IDisposable
         else
         {
             // Diagnostic: explicit reason when we fall back to Full Redraw
-            DebugServer.AppendLog($"[UpdatePreview] -> FULL (UseGpuSwap={config.UseGpuSwap} textureSwap={(textureSwap != null)} canSwap={CanSwapInPlace} denyReason={lastCanSwapDenyReason ?? "(none)"})");
+            DebugServer.AppendLog($"[UpdatePreview] → FULL (UseGpuSwap={config.UseGpuSwap} textureSwap={(textureSwap != null)} canSwap={CanSwapInPlace} denyReason={lastCanSwapDenyReason ?? "(none)"})");
             UpdatePreviewFull(project);
         }
     }
@@ -892,7 +970,7 @@ public class PreviewService : IDisposable
 
         // Capture all data needed by background thread (avoid touching mutable state later)
         var jobs = new List<(TargetGroup Group, string DiffuseGamePath, string? DiskPath,
-            string? NormGamePath, string? NormDiskPath, string? MtrlGamePath, int EmissiveOffset,
+            string? NormGamePath, string? NormSourcePath, string? MtrlGamePath, int EmissiveOffset,
             string? IndexGamePath, string? IndexDiskPath,
             List<LayerSnapshot> Layers, Vector3 EmissiveColor, bool IsSkinCt)>();
 
@@ -929,10 +1007,11 @@ public class PreviewService : IDisposable
                 snapshots.Add(new LayerSnapshot(l));
 
             // Composite base MUST come from the vanilla/mod original, never from
-            // previewDiskPaths (our own prior output) -- user Normal/Mask RGB
+            // previewDiskPaths (our own prior output) — user Normal/Mask RGB
             // paints would accumulate on each async cycle and produce a trail.
+            var normSource = group.OrigNormDiskPath ?? group.NormDiskPath ?? group.NormGamePath;
             jobs.Add((group, group.DiffuseGamePath, diffDisk,
-                group.NormGamePath, group.OrigNormDiskPath ?? group.NormDiskPath,
+                group.NormGamePath, normSource,
                 group.MtrlGamePath, emOff,
                 indexGame, indexDisk,
                 snapshots,
@@ -1062,12 +1141,12 @@ public class PreviewService : IDisposable
                         ctQueued = true;
 
                         // Normal map: row pair index in alpha channel
-                        if (!string.IsNullOrEmpty(job.NormGamePath) && !string.IsNullOrEmpty(job.NormDiskPath))
+                        if (!string.IsNullOrEmpty(job.NormGamePath) && !string.IsNullOrEmpty(job.NormSourcePath))
                         {
                             var normRgbaBuf = EnsureBuf(ref scratch.NormRgba, byteCount);
-                            var normRgba = CompositeRowIndexNorm(
-                                layers, job.NormDiskPath!, baseTex.Width, baseTex.Height,
-                                outputBuffer: normRgbaBuf);
+                            var normRgba = CompositeNorm(
+                                layers, job.NormSourcePath!, baseTex.Width, baseTex.Height,
+                                NormAlphaMode.RowIndex, outputBuffer: normRgbaBuf);
                             if (normRgba != null)
                             {
                                 if (AnyTargetMapLayer(layers, TargetMap.Normal))
@@ -1120,14 +1199,14 @@ public class PreviewService : IDisposable
                     // (non-Dawntrail layouts or materials without patched skin.shpk).
                     bool hasVisibleEmissive = HasEmissiveLayers(job.Layers);
                     bool hadEmissiveState = !string.IsNullOrEmpty(job.MtrlGamePath) && job.EmissiveOffset > 0;
-                    if (!ctQueued && (hasVisibleEmissive || hadEmissiveState) && !string.IsNullOrEmpty(job.NormDiskPath))
+                    if (!ctQueued && (hasVisibleEmissive || hadEmissiveState) && !string.IsNullOrEmpty(job.NormSourcePath))
                     {
                         if (hasVisibleEmissive)
                         {
                             var normRgbaBuf = EnsureBuf(ref scratch.NormRgba, byteCount);
-                            var normRgba = CompositeEmissiveNorm(
-                                layers, job.NormDiskPath!, baseTex.Width, baseTex.Height,
-                                outputBuffer: normRgbaBuf);
+                            var normRgba = CompositeNorm(
+                                layers, job.NormSourcePath!, baseTex.Width, baseTex.Height,
+                                NormAlphaMode.EmissiveMask, outputBuffer: normRgbaBuf);
                             if (normRgba != null)
                             {
                                 if (AnyTargetMapLayer(layers, TargetMap.Normal))
@@ -1187,10 +1266,10 @@ public class PreviewService : IDisposable
                     // User Normal-target layers without emissive: load base + paint RGB
                     bool normWrittenThisCycle = job.IsSkinCt || (!ctQueued && hasVisibleEmissive);
                     if (!normWrittenThisCycle && AnyTargetMapLayer(layers, TargetMap.Normal)
-                        && !string.IsNullOrEmpty(job.NormGamePath) && !string.IsNullOrEmpty(job.NormDiskPath))
+                        && !string.IsNullOrEmpty(job.NormGamePath) && !string.IsNullOrEmpty(job.NormSourcePath))
                     {
                         var normRgbaBuf = EnsureBuf(ref scratch.NormRgba, byteCount);
-                        if (LoadRgbaResizedInto(job.NormDiskPath!, baseTex.Width, baseTex.Height, normRgbaBuf))
+                        if (LoadRgbaResizedInto(job.NormSourcePath!, baseTex.Width, baseTex.Height, normRgbaBuf))
                         {
                             CpuUvComposite(layers, normRgbaBuf, baseTex.Width, baseTex.Height,
                                 outputBuffer: normRgbaBuf,
@@ -1395,7 +1474,7 @@ public class PreviewService : IDisposable
         return rowPairAllocators.GetOrAdd(key, _ => new RowPairAllocator());
     }
 
-    // -- PBR Inspector accessors ----------------------------------------------
+    // ── PBR Inspector accessors ──────────────────────────────────────────────
 
     /// <summary>Vanilla ColorTable bytes for a group's mtrl, or null if not yet cached.</summary>
     public (Half[] Data, int Width, int Height)? GetVanillaColorTable(TargetGroup group)
@@ -1486,7 +1565,7 @@ public class PreviewService : IDisposable
         }
     }
 
-    private string? GetMaskGamePathFromMtrl(string mtrlGamePath, string? mtrlDiskPath)
+    public string? GetMaskGamePathFromMtrl(string mtrlGamePath, string? mtrlDiskPath)
     {
         try
         {
@@ -1737,7 +1816,7 @@ public class PreviewService : IDisposable
             previewDiskPaths.TryRemove(group.MtrlGamePath!, out _);
             previewMtrlDiskPaths.TryRemove(group.MtrlGamePath!, out _);
             emissiveOffsets.TryRemove(group.MtrlGamePath!, out _);
-            // Keep skinCtMaterials -- it persists until ResetSwapState so inplace
+            // Keep skinCtMaterials — it persists until ResetSwapState so inplace
             // composite still routes through the CT path after re-init.
         }
         if (!string.IsNullOrEmpty(group.NormGamePath))
@@ -1750,7 +1829,7 @@ public class PreviewService : IDisposable
     }
 
     /// <summary>Force the next UpdatePreview to take the Full Redraw path across all groups.
-    /// Lighter than ResetSwapState -- keeps row-pair allocators, vanilla CT cache, and
+    /// Lighter than ResetSwapState — keeps row-pair allocators, vanilla CT cache, and
     /// emissive offsets intact, just drops the redirect-init markers so
     /// <see cref="CheckCanSwapInPlace"/> returns false next cycle.</summary>
     public void ForceFullRedrawNextCycle()
@@ -1856,7 +1935,7 @@ public class PreviewService : IDisposable
                 if (!string.IsNullOrEmpty(group.NormGamePath) && !string.IsNullOrEmpty(group.NormDiskPath))
                 {
                     var normSource = group.OrigNormDiskPath ?? group.NormDiskPath!;
-                    var normResult = CompositeRowIndexNorm(visibleLayers, normSource, w, h);
+                    var normResult = CompositeNorm(visibleLayers, normSource, w, h, NormAlphaMode.RowIndex);
                     if (normResult != null)
                     {
                         var normOut = WriteStagingTex(stagingDir, group.NormGamePath!, normResult, w, h);
@@ -1911,7 +1990,7 @@ public class PreviewService : IDisposable
                 if (!string.IsNullOrEmpty(group.NormGamePath) && !string.IsNullOrEmpty(group.NormDiskPath))
                 {
                     var normSource = group.OrigNormDiskPath ?? group.NormDiskPath!;
-                    var normResult = CompositeEmissiveNorm(visibleLayers, normSource, w, h);
+                    var normResult = CompositeNorm(visibleLayers, normSource, w, h, NormAlphaMode.EmissiveMask);
                     if (normResult != null)
                     {
                         var normOut = WriteStagingTex(stagingDir, group.NormGamePath!, normResult, w, h);
@@ -2029,7 +2108,7 @@ public class PreviewService : IDisposable
         return ToForwardSlash(gamePath);
     }
 
-    // -- Private: check if all groups can swap in-place -----------------------
+    // ── Private: check if all groups can swap in-place ───────────────────────
 
     // One-shot CanSwap=NO log gating  -- avoid spamming the log on every poll
     private string? lastCanSwapDenyReason;
@@ -2151,7 +2230,7 @@ public class PreviewService : IDisposable
         return true;
     }
 
-    // -- Private: shared helpers ----------------------------------------------
+    // ── Private: shared helpers ──────────────────────────────────────────────
 
     private (byte[] Data, int Width, int Height) LoadBaseTexture(TargetGroup group)
     {
@@ -2208,7 +2287,7 @@ public class PreviewService : IDisposable
         //
         // Must ignore IsVisible: when the user hides all emissive layers, HasEmissiveLayers()
         // returns false and the passthrough is skipped, breaking CanSwap on next drag. The
-        // group is still emissive-configured -- Penumbra redirect, mtrl hook, and CT all
+        // group is still emissive-configured — Penumbra redirect, mtrl hook, and CT all
         // remain active (emissive values just go to zero when nothing is visible).
         bool hasEmissiveConfigured = false;
         bool hasPbrConfigured = false;
@@ -2283,7 +2362,7 @@ public class PreviewService : IDisposable
         }
         else if (!string.IsNullOrEmpty(group.MtrlGamePath))
         {
-            // Drop stale marker when user switches Diffuse-emissive -> Normal-only emissive.
+            // Drop stale marker when user switches Diffuse-emissive → Normal-only emissive.
             skinCtMaterials.TryRemove(group.MtrlGamePath!, out _);
         }
 
@@ -2297,7 +2376,7 @@ public class PreviewService : IDisposable
             {
                 // skin.shpk + patched shader: per-layer emissive via ColorTable rows.
                 // 1) Allocate row pairs for each emissive layer.
-                // Reserve row pair 0 as "default no emissive" -- non-decal areas
+                // Reserve row pair 0 as "default no emissive" — non-decal areas
                 // have normal.alpha=0 which maps to row 0, so it must stay black.
                 var alloc = GetOrCreateAllocator(group);
                 if (!alloc.Scanned)
@@ -2312,8 +2391,8 @@ public class PreviewService : IDisposable
                         alloc.TryAllocate(layer);
                 }
 
-                // 2) Build ColorTable: Normal-only emissive -> ramp builder so alpha gradient
-                //    drives intensity smoothly; Diffuse-emissive -> per-layer rows.
+                // 2) Build ColorTable: Normal-only emissive → ramp builder so alpha gradient
+                //    drives intensity smoothly; Diffuse-emissive → per-layer rows.
                 byte[] ctBytes = !hasDiffuseEmissive && normalEmissiveLayer != null
                     ? MtrlFileWriter.BuildSkinColorTableNormalEmissive(normalEmissiveLayer)
                     : MtrlFileWriter.BuildSkinColorTablePerLayer(group.Layers);
@@ -2354,7 +2433,7 @@ public class PreviewService : IDisposable
                 if (!string.IsNullOrEmpty(group.NormGamePath))
                 {
                     var normDisk = group.OrigNormDiskPath ?? group.NormDiskPath ?? group.NormGamePath;
-                    var normResult = CompositeRowIndexNorm(group.Layers, normDisk!, w, h);
+                    var normResult = CompositeNorm(group.Layers, normDisk!, w, h, NormAlphaMode.RowIndex);
                     if (normResult != null)
                     {
                         var normPath = Path.Combine(outputDir, $"preview_{safeName}_n.tex");
@@ -2379,7 +2458,7 @@ public class PreviewService : IDisposable
                 if (hasEmissive && !string.IsNullOrEmpty(group.NormGamePath))
                 {
                     var normDisk = group.OrigNormDiskPath ?? group.NormDiskPath ?? group.NormGamePath;
-                    var normResult = CompositeEmissiveNorm(group.Layers, normDisk!, w, h);
+                    var normResult = CompositeNorm(group.Layers, normDisk!, w, h, NormAlphaMode.EmissiveMask);
                     if (normResult != null)
                     {
                         var normPath = Path.Combine(outputDir, $"preview_{safeName}_n.tex");
@@ -2658,191 +2737,25 @@ public class PreviewService : IDisposable
         return img;
     }
 
-    /// <summary>
-    /// Composite emissive area into normal map alpha channel.
-    /// </summary>
-    private byte[]? CompositeEmissiveNorm(List<DecalLayer> layers, string normDiskPath, int w, int h,
-        byte[]? outputBuffer = null)
+    private enum NormAlphaMode
     {
-        int needLen = w * h * 4;
-        var output = outputBuffer != null && outputBuffer.Length >= needLen
-            ? outputBuffer
-            : new byte[needLen];
-
-        // Get base normal bytes WITHOUT mutating the cache entry.
-        byte[]? cachedBytes = null;
-        int cachedW = 0, cachedH = 0;
-        if (baseTextureCache.TryGetValue(normDiskPath, out var cachedNorm))
-        {
-            (cachedBytes, cachedW, cachedH) = cachedNorm;
-        }
-        else
-        {
-            var normImg = File.Exists(normDiskPath) ? imageLoader.LoadImage(normDiskPath) : LoadGameTexture(normDiskPath);
-            if (normImg != null)
-            {
-                baseTextureCache[normDiskPath] = normImg.Value;
-                (cachedBytes, cachedW, cachedH) = normImg.Value;
-            }
-        }
-
-        if (cachedBytes == null)
-        {
-            Array.Clear(output, 0, needLen);
-        }
-        else if (cachedW != w || cachedH != h)
-        {
-            var resized = ResizeBilinear(cachedBytes, cachedW, cachedH, w, h);
-            Buffer.BlockCopy(resized, 0, output, 0, needLen);
-        }
-        else
-        {
-            Buffer.BlockCopy(cachedBytes, 0, output, 0, needLen);
-        }
-
-        // Zero out alpha channel everywhere  -- bound by needLen, not output.Length, since
-        // outputBuffer may be a reused over-sized scratch buffer.
-        for (int i = 3; i < needLen; i += 4)
-            output[i] = 0;
-
-        bool anyEmissive = false;
-        foreach (var layer in layers)
-        {
-            if (!layer.IsVisible || layer.TargetMap != TargetMap.Diffuse || !layer.AffectsEmissive || string.IsNullOrEmpty(layer.ImagePath)) continue;
-
-            var decalImage = imageLoader.LoadImage(layer.ImagePath);
-            if (decalImage == null) continue;
-
-            var (decalData, decalW, decalH) = decalImage.Value;
-            var center = layer.UvCenter;
-            var scale = layer.UvScale;
-            var opacity = layer.Opacity;
-            var rotRad = layer.RotationDeg * (MathF.PI / 180f);
-            var cosR = MathF.Cos(rotRad);
-            var sinR = MathF.Sin(rotRad);
-
-            GetLayerPixelBounds(center, scale, w, h, out int pxMin, out int pxMax, out int pyMin, out int pyMax);
-
-            // Per-row parallel  -- each row writes disjoint output bytes (alpha channel only).
-            // The Math.Max read-modify-write is per-pixel and rows don't overlap.
-            var layerLocal = layer;
-            ParallelRows(pyMin, pyMax, py =>
-            {
-                for (int px = pxMin; px <= pxMax; px++)
-                {
-                    float u = (px + 0.5f) / w;
-                    float v = (py + 0.5f) / h;
-                    float lu = (u - center.X) / scale.X;
-                    float lv = (v - center.Y) / scale.Y;
-                    float ru = lu * cosR + lv * sinR;
-                    float rv = -lu * sinR + lv * cosR;
-                    if (ru < -0.5f || ru > 0.5f || rv < -0.5f || rv > 0.5f) continue;
-                    switch (layerLocal.Clip)
-                    {
-                        case ClipMode.ClipLeft when ru < 0f: continue;
-                        case ClipMode.ClipRight when ru >= 0f: continue;
-                        case ClipMode.ClipTop when rv < 0f: continue;
-                        case ClipMode.ClipBottom when rv >= 0f: continue;
-                    }
-
-                    float du = (ru + 0.5f) * decalW - 0.5f;
-                    float dv = (rv + 0.5f) * decalH - 0.5f;
-                    SampleBilinear(decalData, decalW, decalH, du, dv, out _, out _, out _, out float da);
-                    da *= opacity;
-                    if (da < 0.001f) continue;
-
-                    float maskValue;
-                    if (layerLocal.FadeMask == LayerFadeMask.DirectionalGradient)
-                        maskValue = ComputeDirectionalGradient(ru, rv, da,
-                            layerLocal.GradientAngleDeg, layerLocal.GradientScale, layerLocal.FadeMaskFalloff, layerLocal.GradientOffset);
-                    else if (layerLocal.FadeMask == LayerFadeMask.ShapeOutline)
-                    {
-                        // Sample 8 neighbors at 1-pixel offset to detect alpha edges
-                        float sum = 0; int cnt = 0;
-                        for (int dy = -1; dy <= 1; dy++)
-                            for (int dx = -1; dx <= 1; dx++)
-                            {
-                                if (dx == 0 && dy == 0) continue;
-                                float ndu = du + dx; float ndv = dv + dy;
-                                SampleBilinear(decalData, decalW, decalH, ndu, ndv, out _, out _, out _, out float na);
-                                sum += na * opacity; cnt++;
-                            }
-                        maskValue = ComputeShapeOutline(da, layerLocal.FadeMaskFalloff, sum / cnt);
-                    }
-                    else
-                        maskValue = ComputeFadeMaskWeight(layerLocal.FadeMask, layerLocal.FadeMaskFalloff, ru, rv, da);
-
-                    int oIdx = (py * w + px) * 4;
-                    byte emByte = (byte)Math.Clamp((int)(maskValue * 255), 0, 255);
-                    output[oIdx + 3] = (byte)Math.Max(output[oIdx + 3], emByte);
-                }
-            });
-
-            anyEmissive = true;
-        }
-
-        foreach (var layer in layers)
-        {
-            if (!layer.IsVisible || layer.TargetMap != TargetMap.Normal || !layer.AffectsEmissive || string.IsNullOrEmpty(layer.ImagePath)) continue;
-
-            var decalImage = imageLoader.LoadImage(layer.ImagePath);
-            if (decalImage == null) continue;
-
-            var (decalData, decalW, decalH) = decalImage.Value;
-            var center = layer.UvCenter;
-            var scale = layer.UvScale;
-            var opacity = layer.Opacity;
-            var rotRad = layer.RotationDeg * (MathF.PI / 180f);
-            var cosR = MathF.Cos(rotRad);
-            var sinR = MathF.Sin(rotRad);
-
-            GetLayerPixelBounds(center, scale, w, h, out int pxMin, out int pxMax, out int pyMin, out int pyMax);
-
-            var layerLocal = layer;
-            ParallelRows(pyMin, pyMax, py =>
-            {
-                for (int px = pxMin; px <= pxMax; px++)
-                {
-                    float u = (px + 0.5f) / w;
-                    float v = (py + 0.5f) / h;
-                    float lu = (u - center.X) / scale.X;
-                    float lv = (v - center.Y) / scale.Y;
-                    float ru = lu * cosR + lv * sinR;
-                    float rv = -lu * sinR + lv * cosR;
-                    if (ru < -0.5f || ru > 0.5f || rv < -0.5f || rv > 0.5f) continue;
-                    switch (layerLocal.Clip)
-                    {
-                        case ClipMode.ClipLeft when ru < 0f: continue;
-                        case ClipMode.ClipRight when ru >= 0f: continue;
-                        case ClipMode.ClipTop when rv < 0f: continue;
-                        case ClipMode.ClipBottom when rv >= 0f: continue;
-                    }
-
-                    float du = (ru + 0.5f) * decalW - 0.5f;
-                    float dv = (rv + 0.5f) * decalH - 0.5f;
-                    SampleBilinear(decalData, decalW, decalH, du, dv, out _, out _, out _, out float da);
-                    da *= opacity;
-                    if (da < 0.001f) continue;
-
-                    int oIdx = (py * w + px) * 4;
-                    byte emByte = (byte)Math.Clamp((int)(da * 255), 0, 255);
-                    output[oIdx + 3] = (byte)Math.Max(output[oIdx + 3], emByte);
-                }
-            });
-
-            anyEmissive = true;
-        }
-
-        return anyEmissive ? output : null;
+        /// <summary>smooth alpha [0-255] read by skin.shpk CBuffer emissive hook</summary>
+        EmissiveMask,
+        /// <summary>
+        /// alpha = rowPair*17 (discrete); G = (1-mask)*255 encodes smooth falloff via
+        /// character.shpk intra-pair interpolation (rowBlend = 1 - G/255)
+        /// </summary>
+        RowIndex,
     }
 
     /// <summary>
-    /// Write row pair index to normal.alpha for skin.shpk ColorTable mode.
-    /// Each emissive layer paints its allocated row pair index (0-15 -> 0,17,...255)
-    /// into the normal map alpha channel. Non-covered pixels stay at 0 (row 0).
+    /// Unified normal-map alpha compositor.
+    /// Replaces CompositeEmissiveNorm + CompositeRowIndexNorm.
+    /// Both Diffuse-target (fade mask applied) and Normal-target (raw alpha) emissive layers
+    /// are handled in a single pass, gated by alphaMode.
     /// </summary>
-    private byte[]? CompositeRowIndexNorm(List<DecalLayer> layers, string normDiskPath, int w, int h,
-        byte[]? outputBuffer = null)
+    private byte[]? CompositeNorm(List<DecalLayer> layers, string normDiskPath, int w, int h,
+        NormAlphaMode alphaMode, byte[]? outputBuffer = null)
     {
         int needLen = w * h * 4;
         var output = outputBuffer != null && outputBuffer.Length >= needLen
@@ -2870,20 +2783,30 @@ public class PreviewService : IDisposable
         else
             Buffer.BlockCopy(cachedBytes, 0, output, 0, needLen);
 
-        // Zero alpha everywhere first (row 0 = default, no emissive)
+        // Zero alpha everywhere; RowIndex also resets G so the base row is fully weighted
+        // until a layer writes its own falloff value.
         for (int i = 3; i < needLen; i += 4)
             output[i] = 0;
+        if (alphaMode == NormAlphaMode.RowIndex)
+            for (int i = 1; i < needLen; i += 4)
+                output[i] = 255; // G=255 → rowBlend=0 → pure base row (no emissive) by default
 
         bool anyPainted = false;
         foreach (var layer in layers)
         {
-            if (!layer.IsVisible || layer.TargetMap != TargetMap.Diffuse || !layer.AffectsEmissive || layer.AllocatedRowPair < 0) continue;
-            if (string.IsNullOrEmpty(layer.ImagePath)) continue;
+            if (!layer.IsVisible || !layer.AffectsEmissive || string.IsNullOrEmpty(layer.ImagePath)) continue;
+            if (layer.TargetMap != TargetMap.Diffuse && layer.TargetMap != TargetMap.Normal) continue;
+            if (alphaMode == NormAlphaMode.RowIndex && layer.AllocatedRowPair < 0) continue;
 
             var decalImage = imageLoader.LoadImage(layer.ImagePath);
             if (decalImage == null) continue;
 
-            byte rowByte = (byte)Math.Clamp(layer.AllocatedRowPair * 17, 0, 255);
+            byte rowByte = alphaMode == NormAlphaMode.RowIndex
+                ? (byte)Math.Clamp(layer.AllocatedRowPair * 17, 0, 255)
+                : (byte)0;
+            // Normal-target emissive layers use raw decal alpha; Diffuse-target goes through fade mask.
+            bool applyFadeMask = layer.TargetMap == TargetMap.Diffuse;
+
             var (decalData, decalW, decalH) = decalImage.Value;
             var center = layer.UvCenter;
             var scale = layer.UvScale;
@@ -2921,13 +2844,17 @@ public class PreviewService : IDisposable
                     da *= opacity;
                     if (da < 0.001f) continue;
 
-                    // Fade mask controls emissive coverage boundary shape.
-                    // Row index is discrete so we can't do smooth alpha gradients,
-                    // but the fade mask determines WHERE the boundary falls.
                     float maskValue;
-                    if (layerLocal.FadeMask == LayerFadeMask.DirectionalGradient)
+                    if (!applyFadeMask)
+                    {
+                        maskValue = da;
+                    }
+                    else if (layerLocal.FadeMask == LayerFadeMask.DirectionalGradient)
+                    {
                         maskValue = ComputeDirectionalGradient(ru, rv, da,
-                            layerLocal.GradientAngleDeg, layerLocal.GradientScale, layerLocal.FadeMaskFalloff, layerLocal.GradientOffset);
+                            layerLocal.GradientAngleDeg, layerLocal.GradientScale,
+                            layerLocal.FadeMaskFalloff, layerLocal.GradientOffset);
+                    }
                     else if (layerLocal.FadeMask == LayerFadeMask.ShapeOutline)
                     {
                         float sum = 0; int cnt = 0;
@@ -2935,24 +2862,37 @@ public class PreviewService : IDisposable
                             for (int dx = -1; dx <= 1; dx++)
                             {
                                 if (dx == 0 && dy == 0) continue;
-                                float ndu = du + dx; float ndv = dv + dy;
-                                SampleBilinear(decalData, decalW, decalH, ndu, ndv, out _, out _, out _, out float na);
+                                SampleBilinear(decalData, decalW, decalH, du + dx, dv + dy,
+                                    out _, out _, out _, out float na);
                                 sum += na * opacity; cnt++;
                             }
                         maskValue = ComputeShapeOutline(da, layerLocal.FadeMaskFalloff, sum / cnt);
                     }
                     else
-                        maskValue = ComputeFadeMaskWeight(layerLocal.FadeMask, layerLocal.FadeMaskFalloff, ru, rv, da);
+                    {
+                        maskValue = ComputeFadeMaskWeight(layerLocal.FadeMask,
+                            layerLocal.FadeMaskFalloff, ru, rv, da);
+                    }
 
-                    if (maskValue < 0.5f) continue;
-
-                    output[(py * w + px) * 4 + 3] = rowByteLocal;
+                    int oIdx = (py * w + px) * 4;
+                    if (alphaMode == NormAlphaMode.EmissiveMask)
+                    {
+                        byte emByte = (byte)Math.Clamp(maskValue * 255f, 0, 255);
+                        output[oIdx + 3] = (byte)Math.Max(output[oIdx + 3], emByte);
+                    }
+                    else
+                    {
+                        // alpha = discrete row index; G encodes smooth falloff so the shader
+                        // can interpolate between emissive and base rows at decal edges.
+                        // G=0 → rowBlend=1 → full emissive row; G=255 → rowBlend=0 → base row.
+                        output[oIdx + 3] = rowByteLocal;
+                        output[oIdx + 1] = (byte)Math.Clamp((1f - maskValue) * 255f, 0, 255);
+                    }
                 }
             });
             anyPainted = true;
         }
 
-        // Diagnostic removed (was per-frame spam)
         return anyPainted ? output : null;
     }
 
@@ -3046,7 +2986,7 @@ public class PreviewService : IDisposable
     /// shaders read `tablePair = round(g_SamplerIndex.r / 17)` and `rowBlend = 1 - g/255`,
     /// then `lerp(table[tablePair*2], table[tablePair*2+1], rowBlend)`. We write:
     ///   index.R = rowPair * 17  (selects which row pair this pixel uses)
-    ///   index.G = weight * 255  (weight=1 => G=255 => rowBlend=0 => reads layer override row)
+    ///   index.G = weight * 255  (weight=1 ⇒ G=255 ⇒ rowBlend=0 ⇒ reads layer override row)
     /// Vanilla B and A are preserved.
     /// </summary>
     private byte[]? CompositeIndexMap(List<DecalLayer> allocatedLayers, string indexDiskOrGamePath, int w, int h,
@@ -3192,7 +3132,7 @@ public class PreviewService : IDisposable
 
     // Picks the first visible emissive layer's animation params. For single-layer groups
     // (iris etc.) this is exact; for legacy multi-layer skin fallbacks it is a best-effort
-    // approximation -- skin.shpk CT path handles per-layer anim directly and does not reach here.
+    // approximation — skin.shpk CT path handles per-layer anim directly and does not reach here.
     private static (EmissiveAnimMode Mode, float Speed, float Amp, Vector3 ColorB) GetDominantEmissiveAnim(List<DecalLayer> layers)
     {
         foreach (var l in layers)
@@ -3363,10 +3303,9 @@ public class PreviewService : IDisposable
 
         if (patchedSkinShpkPath == null || !File.Exists(patchedSkinShpkPath))
         {
-            // v8: register-agnostic emissive replace (32/32 PSes vs 8/32 before) + gloss-mask
-            //     re-injection. Pulse anchor still r1-only, so animations degrade to static
-            //     emissive on non-r1 dest SceneKey variants (~24/32 states).
-            var candidate = Path.Combine(outputDir, "skin_ct_v8.shpk");
+            // v6: Ripple direction modes (radial/linear/bidir) + dual-color ripple.
+            // Payload 220 → 276 tokens with new col 6 sample and dir dispatch.
+            var candidate = Path.Combine(outputDir, "skin_ct_v6.shpk");
             if (!File.Exists(candidate))
             {
                 // Runtime patch: read vanilla skin.shpk from SqPack and patch in memory
@@ -3417,7 +3356,7 @@ public class PreviewService : IDisposable
 
         // Ensure EmissiveCBufferHook is enabled so skin-family materials flow through
         // the detour for one-shot ShaderPackage diagnostics (even if no CBuffer target
-        // is registered -- skin CT materials skip SetTargetByPath entirely).
+        // is registered — skin CT materials skip SetTargetByPath entirely).
         emissiveHook?.EnableForDiagnostics();
     }
 
@@ -3543,13 +3482,13 @@ public class PreviewService : IDisposable
         foreach (var (_, r) in applicable)
             currentUnion = DirtyRect.Union(currentUnion, r);
 
-        // dirty = current  U  previous (or full on first init / no tracker)
+        // dirty = current ∪ previous (or full on first init / no tracker)
         DirtyRect dirty = tracker == null
             ? DirtyRect.Full(w, h)
             : tracker.ComputeDirty(currentUnion, w, h);
 
         // Restore base pixels over the dirty region. Outside dirty, the output already
-        // equals base (since previous-cycle paint  subset_of  previous_union  subset_of  dirty), so no
+        // equals base (since previous-cycle paint ⊆ previous_union ⊆ dirty), so no
         // work needed there. This is the core CPU saving: 4096^2 -> dirty W*H bytes.
         if (!dirty.IsEmpty)
         {
@@ -3615,7 +3554,7 @@ public class PreviewService : IDisposable
                     // Previously this clipped the diffuse to the emissive feather-mask
                     // boundary (mv >= 0.5) so the diffuse couldn't extend past the
                     // emissive region. That caused the underlying decal to disappear
-                    // whenever the user combined "show decal" + emissive + a feather --
+                    // whenever the user combined "show decal" + emissive + a feather —
                     // and if emissive was black, nothing rendered at all.
                     // Now diffuse always paints the full decal shape; emissive coverage
                     // is independently controlled by the normal.a row-index composite.
