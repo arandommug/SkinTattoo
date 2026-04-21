@@ -190,6 +190,40 @@ public sealed class LibraryService
         }
     }
 
+    // Delete a folder and any subfolders. Entries inside are reassigned to the parent
+    // folder (root if the deleted folder was top-level), so no library content is lost.
+    public bool DeleteFolder(string folderPath)
+    {
+        var normalized = NormalizeFolderPath(folderPath);
+        if (string.IsNullOrEmpty(normalized)) return false;
+
+        var idx = normalized.LastIndexOf('/');
+        var parent = idx < 0 ? string.Empty : normalized[..idx];
+
+        lock (sync)
+        {
+            foreach (var entry in entries.Values)
+            {
+                var ef = NormalizeFolderPath(entry.FolderPath);
+                if (string.IsNullOrEmpty(ef)) continue;
+                if (string.Equals(ef, normalized, StringComparison.OrdinalIgnoreCase) ||
+                    ef.StartsWith(normalized + "/", StringComparison.OrdinalIgnoreCase))
+                {
+                    entry.FolderPath = parent;
+                }
+            }
+
+            var toRemove = folders.Where(f =>
+                string.Equals(f, normalized, StringComparison.OrdinalIgnoreCase) ||
+                f.StartsWith(normalized + "/", StringComparison.OrdinalIgnoreCase)
+            ).ToList();
+            foreach (var f in toRemove) folders.Remove(f);
+
+            SaveIndexLocked();
+            return true;
+        }
+    }
+
     public LibraryEntry? Get(string hash)
     {
         if (string.IsNullOrEmpty(hash)) return null;
@@ -333,9 +367,9 @@ public sealed class LibraryService
         try
         {
             var json = File.ReadAllText(indexPath);
-            // Legacy format (pre-folder): JSON root is a List<LibraryEntry>. New format
-            // wraps entries in LibraryIndexModel. Dispatch on the first non-whitespace char
-            // to avoid deserializing the wrong shape (which throws and wipes the index).
+            // Format dispatch: pre-folder builds wrote a bare List<LibraryEntry>; current
+            // builds write LibraryIndexModel. Pick by first non-whitespace char so an old
+            // index migrates transparently on next save instead of being wiped.
             List<LibraryEntry>? list;
             LibraryIndexModel? model = null;
             var trimmed = json.AsSpan().TrimStart();
@@ -349,23 +383,39 @@ public sealed class LibraryService
                 list = model?.Entries;
             }
             if (list == null) return;
+            bool needsRewrite = false;
             lock (sync)
             {
                 entries.Clear();
                 folders.Clear();
                 foreach (var e in list)
                 {
-                    if (string.IsNullOrEmpty(e.Hash) || string.IsNullOrEmpty(e.FileName)) continue;
+                    if (string.IsNullOrEmpty(e.Hash) || string.IsNullOrEmpty(e.FileName))
+                    {
+                        needsRewrite = true;
+                        continue;
+                    }
+                    var blob = Path.Combine(blobDir, e.FileName);
+                    if (!File.Exists(blob))
+                    {
+                        // Stale entry whose backing file is gone. Drop it permanently and
+                        // also clean any orphan thumbnail so the index stays small.
+                        try { File.Delete(Path.Combine(thumbDir, e.Hash + ".png")); } catch { }
+                        needsRewrite = true;
+                        continue;
+                    }
                     e.FolderPath = NormalizeFolderPath(e.FolderPath);
                     entries[e.Hash] = e;
                     EnsureFolderTrackedLocked(e.FolderPath);
                 }
-
                 if (model != null)
                 {
                     foreach (var f in model.Folders)
                         EnsureFolderTrackedLocked(f);
                 }
+                // Persist if we dropped anything OR migrated from the legacy array format.
+                if (needsRewrite || model == null)
+                    SaveIndexLocked();
             }
         }
         catch (Exception ex)

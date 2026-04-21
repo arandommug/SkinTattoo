@@ -213,15 +213,27 @@ public class DecalProject
                     l.ImagePath = resolved;
                     continue;
                 }
+                // Hash was set but library no longer has it: the blob the layer pointed
+                // at is gone for good. Clear ImagePath too so the layer reverts to "no
+                // image" instead of dangling and spamming load errors every frame.
                 l.ImageHash = null;
+                l.ImagePath = null;
+                continue;
             }
-            if (!string.IsNullOrEmpty(l.ImagePath) && File.Exists(l.ImagePath))
+            if (!string.IsNullOrEmpty(l.ImagePath))
             {
-                var entry = library.ImportFromPath(l.ImagePath);
-                if (entry != null)
+                if (File.Exists(l.ImagePath))
                 {
-                    l.ImageHash = entry.Hash;
-                    l.ImagePath = library.ResolveDiskPath(entry.Hash) ?? l.ImagePath;
+                    var entry = library.ImportFromPath(l.ImagePath);
+                    if (entry != null)
+                    {
+                        l.ImageHash = entry.Hash;
+                        l.ImagePath = library.ResolveDiskPath(entry.Hash) ?? l.ImagePath;
+                    }
+                }
+                else
+                {
+                    l.ImagePath = null;
                 }
             }
         }

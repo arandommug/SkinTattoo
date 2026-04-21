@@ -33,6 +33,7 @@ public sealed class LibraryWindow : Window
 
     private string search = string.Empty;
     private string? pendingDeleteHash;
+    private string? pendingDeleteFolder;
     private string? selectedEntryHash;
     private string selectedFolder = string.Empty;
     private string createFolderInput = string.Empty;
@@ -65,17 +66,17 @@ public sealed class LibraryWindow : Window
     {
         fileDialog.Draw();
 
-        if (ImGuiComponents.IconButton(FontAwesomeIcon.FileImport))
+        if (UiHelpers.SquareIconButton("libImport", FontAwesomeIcon.FileImport))
             OpenImportFilesDialog();
         if (ImGui.IsItemHovered()) ImGui.SetTooltip(Strings.T("library.tooltip.import"));
 
         ImGui.SameLine();
-        if (ImGuiComponents.IconButton(FontAwesomeIcon.FolderOpen))
+        if (UiHelpers.SquareIconButton("libImportFolder", FontAwesomeIcon.FolderOpen))
             OpenImportFolderDialog();
         if (ImGui.IsItemHovered()) ImGui.SetTooltip(Strings.T("library.tooltip.import_folder"));
 
         ImGui.SameLine();
-        if (ImGuiComponents.IconButton(FontAwesomeIcon.FolderPlus))
+        if (UiHelpers.SquareIconButton("libCreateFolder", FontAwesomeIcon.FolderPlus))
             ImGui.OpenPopup("##libCreateFolder");
         if (ImGui.IsItemHovered()) ImGui.SetTooltip(Strings.T("library.tooltip.create_folder"));
 
@@ -126,6 +127,7 @@ public sealed class LibraryWindow : Window
                 DrawGridMode(childFolders, entries, GetCellSize(viewMode));
 
             DrawDeleteConfirm();
+            DrawFolderDeleteConfirm();
         }
     }
 
@@ -236,10 +238,12 @@ public sealed class LibraryWindow : Window
         if (ImGui.BeginTable("##LibraryDetailTable", 4,
                 ImGuiTableFlags.RowBg | ImGuiTableFlags.Borders | ImGuiTableFlags.Resizable | ImGuiTableFlags.ScrollY))
         {
-            ImGui.TableSetupColumn(Strings.T("library.detail.name"), ImGuiTableColumnFlags.WidthStretch, 0.45f);
-            ImGui.TableSetupColumn(Strings.T("library.detail.type"), ImGuiTableColumnFlags.WidthStretch, 0.18f);
-            ImGui.TableSetupColumn(Strings.T("library.detail.size"), ImGuiTableColumnFlags.WidthStretch, 0.18f);
-            ImGui.TableSetupColumn(Strings.T("library.detail.added"), ImGuiTableColumnFlags.WidthStretch, 0.19f);
+            // Name column stretches to fill remaining space; the other columns auto-size
+            // to their content (file extension, formatted size, date string).
+            ImGui.TableSetupColumn(Strings.T("library.detail.name"), ImGuiTableColumnFlags.WidthStretch);
+            ImGui.TableSetupColumn(Strings.T("library.detail.type"), ImGuiTableColumnFlags.WidthFixed);
+            ImGui.TableSetupColumn(Strings.T("library.detail.size"), ImGuiTableColumnFlags.WidthFixed);
+            ImGui.TableSetupColumn(Strings.T("library.detail.added"), ImGuiTableColumnFlags.WidthFixed);
             ImGui.TableHeadersRow();
 
             foreach (var folder in childFolders)
@@ -357,6 +361,13 @@ public sealed class LibraryWindow : Window
         var clicked = ImGui.InvisibleButton("##folder_" + folderPath, new Vector2(size, size));
         var hovered = ImGui.IsItemHovered();
 
+        if (ImGui.BeginPopupContextItem("##folderCtx_" + folderPath))
+        {
+            if (ImGui.MenuItem(Strings.T("library.menu.delete_folder")))
+                pendingDeleteFolder = folderPath;
+            ImGui.EndPopup();
+        }
+
         var drawList = ImGui.GetWindowDrawList();
         var bg = hovered
             ? ImGui.GetColorU32(ImGuiCol.FrameBgHovered)
@@ -407,7 +418,7 @@ public sealed class LibraryWindow : Window
     private void DrawFolderBreadcrumbs(string currentFolder)
     {
         var allLabel = Strings.T("library.folder.all");
-        if (ImGui.SmallButton(allLabel + "##crumb_root"))
+        if (ImGui.Button(allLabel + "##crumb_root"))
             selectedFolder = string.Empty;
 
         if (string.IsNullOrEmpty(currentFolder))
@@ -418,11 +429,12 @@ public sealed class LibraryWindow : Window
         foreach (var part in parts)
         {
             ImGui.SameLine();
+            ImGui.AlignTextToFramePadding();
             ImGui.TextDisabled(">");
             ImGui.SameLine();
 
             path = string.IsNullOrEmpty(path) ? part : path + "/" + part;
-            if (ImGui.SmallButton(part + "##crumb_" + path))
+            if (ImGui.Button(part + "##crumb_" + path))
                 selectedFolder = path;
         }
     }
@@ -514,28 +526,19 @@ public sealed class LibraryWindow : Window
 
     private void DrawLargeFolderIcon(ImDrawListPtr drawList, Vector2 cursor, float size, bool hovered)
     {
-        var iconWidth = size * 0.84f;
-        var iconHeight = size * 0.68f;
-        var x = cursor.X + (size - iconWidth) * 0.5f;
-        var y = cursor.Y + (size - iconHeight) * 0.5f;
-
-        var bodyMin = new Vector2(x, y + iconHeight * 0.22f);
-        var bodyMax = new Vector2(x + iconWidth, y + iconHeight);
-        var tabMin = new Vector2(x + iconWidth * 0.08f, y);
-        var tabMax = new Vector2(x + iconWidth * 0.48f, y + iconHeight * 0.32f);
-
-        var bodyColor = hovered
-            ? ImGui.GetColorU32(ImGuiCol.FrameBgHovered)
-            : ImGui.GetColorU32(ImGuiCol.FrameBg);
-        var tabColor = hovered
-            ? ImGui.GetColorU32(ImGuiCol.Header)
-            : ImGui.GetColorU32(ImGuiCol.TitleBg);
-        var borderColor = ImGui.GetColorU32(ImGuiCol.Border);
-
-        drawList.AddRectFilled(tabMin, tabMax, tabColor, 3f);
-        drawList.AddRectFilled(bodyMin, bodyMax, bodyColor, 4f);
-        drawList.AddRect(tabMin, tabMax, borderColor, 3f, ImDrawFlags.None, 1.2f);
-        drawList.AddRect(bodyMin, bodyMax, borderColor, 4f, ImDrawFlags.None, 1.2f);
+        // Use the icon at its native size -- the bitmap font glyph blurs badly when
+        // upscaled. The cell background + folder name below carry the "folder" feel.
+        ImGui.PushFont(UiBuilder.IconFont);
+        var iconStr = FontAwesomeIcon.FolderOpen.ToIconString();
+        var iconColor = hovered
+            ? ImGui.GetColorU32(new Vector4(0.95f, 0.78f, 0.40f, 1f))
+            : ImGui.GetColorU32(new Vector4(0.85f, 0.70f, 0.35f, 1f));
+        var measured = ImGui.CalcTextSize(iconStr);
+        var iconPos = new Vector2(
+            cursor.X + (size - measured.X) * 0.5f,
+            cursor.Y + (size - measured.Y) * 0.5f);
+        drawList.AddText(iconPos, iconColor, iconStr);
+        ImGui.PopFont();
     }
 
     private static void DrawNameTypeIcon(FontAwesomeIcon icon)
@@ -776,6 +779,37 @@ public sealed class LibraryWindow : Window
         catch
         {
             return Strings.T("library.na");
+        }
+    }
+
+    private void DrawFolderDeleteConfirm()
+    {
+        if (pendingDeleteFolder == null) return;
+
+        ImGui.OpenPopup("##lib_folder_delete_confirm");
+        using var popup = ImRaii.PopupModal("##lib_folder_delete_confirm",
+            ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoTitleBar);
+        if (!popup.Success) return;
+
+        ImGui.TextUnformatted(Strings.T("library.folder.delete_prompt", pendingDeleteFolder));
+        ImGui.Spacing();
+
+        if (ImGui.Button(Strings.T("button.confirm"), new Vector2(120, 0)))
+        {
+            var deleted = pendingDeleteFolder;
+            library.DeleteFolder(deleted);
+            // If the deleted folder (or any of its children) was the active view, snap back to root.
+            if (selectedFolder.Equals(deleted, StringComparison.OrdinalIgnoreCase) ||
+                selectedFolder.StartsWith(deleted + "/", StringComparison.OrdinalIgnoreCase))
+                selectedFolder = string.Empty;
+            pendingDeleteFolder = null;
+            ImGui.CloseCurrentPopup();
+        }
+        ImGui.SameLine();
+        if (ImGui.Button(Strings.T("button.cancel"), new Vector2(120, 0)))
+        {
+            pendingDeleteFolder = null;
+            ImGui.CloseCurrentPopup();
         }
     }
 

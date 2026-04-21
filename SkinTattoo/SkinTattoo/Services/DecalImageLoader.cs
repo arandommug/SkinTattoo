@@ -20,6 +20,10 @@ public class DecalImageLoader
     private readonly ConcurrentDictionary<string, CacheEntry> imageCache =
         new(StringComparer.OrdinalIgnoreCase);
 
+    // Dedup missing-file errors: spamming the log on every retry causes UI hitches.
+    private readonly ConcurrentDictionary<string, byte> reportedMissing =
+        new(StringComparer.OrdinalIgnoreCase);
+
     public DecalImageLoader(IPluginLog log, IDataManager dataManager)
     {
         this.log = log;
@@ -82,8 +86,11 @@ public class DecalImageLoader
             fi = new FileInfo(path);
             if (!fi.Exists)
             {
-                log.Error("Image file not found: {0}", path);
-                DebugServer.AppendLog($"[ImageLoader] File not found: {path}");
+                if (reportedMissing.TryAdd(path, 0))
+                {
+                    log.Error("Image file not found: {0}", path);
+                    DebugServer.AppendLog($"[ImageLoader] File not found: {path}");
+                }
                 return null;
             }
         }
