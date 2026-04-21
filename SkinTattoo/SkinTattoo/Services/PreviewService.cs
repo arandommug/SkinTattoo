@@ -2716,13 +2716,10 @@ public class PreviewService : IDisposable
         else
             Buffer.BlockCopy(cachedBytes, 0, output, 0, needLen);
 
-        // Zero alpha everywhere; RowIndex also resets G so the base row is fully weighted
-        // until a layer writes its own falloff value.
+        // Zero alpha everywhere. Preserve G: skin.shpk-family shaders rely on the
+        // base normal.G (gloss/tangent data -- critical for oily-skin mods at night).
         for (int i = 3; i < needLen; i += 4)
             output[i] = 0;
-        if (alphaMode == NormAlphaMode.RowIndex)
-            for (int i = 1; i < needLen; i += 4)
-                output[i] = 255; // G=255 -> rowBlend=0 -> pure base row (no emissive) by default
 
         bool anyPainted = false;
         foreach (var layer in layers)
@@ -2813,13 +2810,11 @@ public class PreviewService : IDisposable
                         byte emByte = (byte)Math.Clamp(maskValue * 255f, 0, 255);
                         output[oIdx + 3] = (byte)Math.Max(output[oIdx + 3], emByte);
                     }
-                    else
+                    else if (maskValue >= 0.5f)
                     {
-                        // alpha = discrete row index; G encodes smooth falloff so the shader
-                        // can interpolate between emissive and base rows at decal edges.
-                        // G=0 -> rowBlend=1 -> full emissive row; G=255 -> rowBlend=0 -> base row.
+                        // Write row-index into alpha only; leave G untouched so the base
+                        // normal map's gloss/tangent data survives for the lighting pass.
                         output[oIdx + 3] = rowByteLocal;
-                        output[oIdx + 1] = (byte)Math.Clamp((1f - maskValue) * 255f, 0, 255);
                     }
                 }
             });
