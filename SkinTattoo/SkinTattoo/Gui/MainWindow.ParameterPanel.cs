@@ -164,25 +164,27 @@ public partial class MainWindow
     {
         if (LibraryWindowRef == null || library == null) return;
 
-        var capturedGi = project.SelectedGroupIndex;
-        var capturedLi = idx;
         LibraryWindowRef.OnPicked = entry =>
         {
-            if (capturedGi >= project.Groups.Count) return;
-            var g = project.Groups[capturedGi];
-            if (capturedLi >= g.Layers.Count) return;
-            var picked = g.Layers[capturedLi];
+            var g = project.SelectedGroup;
+            if (g == null) return;
+            var picked = g.SelectedLayer;
+            if (picked == null) return;
+
             var resolved = library.ResolveDiskPath(entry.Hash);
             if (resolved == null) return;
+
             picked.ImageHash = entry.Hash;
             picked.ImagePath = resolved;
+            LibraryWindowRef.SetSelectedEntry(entry.Hash);
             library.Touch(entry.Hash);
             AutoFitLayerScale(g, picked);
             imagePathBuf = resolved;
-            lastEditedLayerIndex = capturedLi;
+            lastEditedLayerIndex = g.SelectedLayerIndex;
             TryAutoDetectNormalMap(picked);
             MarkPreviewDirty();
         };
+        LibraryWindowRef.SetSelectedEntry(layer.ImageHash);
         LibraryWindowRef.IsOpen = true;
         LibraryWindowRef.BringToFront();
     }

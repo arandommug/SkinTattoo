@@ -48,7 +48,7 @@ public class SavedLayer
     public int Kind { get; set; } = 0;
 
     // Which output texture the layer paints into. 0=Diffuse, 1=Mask, 2=Normal.
-    // Missing in older saves -> deserializes to 0 (Diffuse), preserving legacy behavior.
+    // Missing in older saves → deserializes to 0 (Diffuse), preserving legacy behavior.
     public int TargetMap { get; set; } = 0;
 
     public bool AffectsSpecular { get; set; }
@@ -106,6 +106,7 @@ public class Configuration : IPluginConfiguration
     public bool DebugWindowOpen { get; set; }
     public bool ModelEditorWindowOpen { get; set; }
     public string? LastImageDir { get; set; }
+    public int LibraryViewMode { get; set; } = 1;
     public bool AutoPreview { get; set; } = true;
     public bool UseGpuSwap { get; set; } = true;
 
@@ -123,6 +124,9 @@ public class Configuration : IPluginConfiguration
     public float UvWireframeColorG { get; set; } = 0.141f;
     public float UvWireframeColorB { get; set; } = 1f;
     public float UvWireframeColorA { get; set; } = 0.784f;
+    public int UvViewTargetMap { get; set; } = 0;
+    public bool UvCurrentDecalOnly { get; set; } = false;
+    public bool UvShowBaseTexture { get; set; } = true;
 
     [NonSerialized]
     private IDalamudPluginInterface? pluginInterface;

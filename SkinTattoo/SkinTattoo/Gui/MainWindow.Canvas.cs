@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
+using Dalamud.Interface.Textures;
+using Dalamud.Interface.Textures.TextureWraps;
 using Dalamud.Plugin.Services;
 using SkinTattoo.Core;
 using SkinTattoo.Services;
@@ -14,8 +16,66 @@ public partial class MainWindow
 {
     // UV mesh wireframe toggle
     private bool showUvWireframe;
+    private sealed record CanvasOverlayTexCacheEntry(IDalamudTextureWrap Wrap, DateTime Mtime, long Size);
+    private readonly Dictionary<string, CanvasOverlayTexCacheEntry> canvasOverlayTexCache = new(StringComparer.OrdinalIgnoreCase);
 
-    // -- Center Panel: Interactive UV Canvas ----------------------------------
+    private void SyncCanvasMapModeFromSelectedLayer()
+    {
+        var group = project.SelectedGroup;
+        var gi = project.SelectedGroupIndex;
+        var li = group?.SelectedLayerIndex ?? -1;
+        var layer = group?.SelectedLayer;
+        var target = layer?.TargetMap ?? TargetMap.Diffuse;
+
+        if (gi == lastCanvasSyncGroupIndex
+            && li == lastCanvasSyncLayerIndex
+            && target == lastCanvasSyncLayerTargetMap)
+            return;
+
+        lastCanvasSyncGroupIndex = gi;
+        lastCanvasSyncLayerIndex = li;
+        lastCanvasSyncLayerTargetMap = target;
+
+        if (layer != null && CanvasMapMode != target)
+        {
+            CanvasMapMode = target;
+            SaveCanvasViewSettings();
+        }
+    }
+
+    private static string? GuessMaskPathFromSibling(string? texPath)
+    {
+        if (string.IsNullOrEmpty(texPath)) return null;
+
+        var p = texPath.Replace('\\', '/');
+        string ext = Path.GetExtension(p);
+        if (string.IsNullOrEmpty(ext)) ext = ".tex";
+
+        bool EndsWithToken(string s, string token)
+            => s.EndsWith(token + ext, StringComparison.OrdinalIgnoreCase);
+
+        if (p.EndsWith("_base.tex", StringComparison.OrdinalIgnoreCase))
+            return p[..^"_base.tex".Length] + "_mask" + ext;
+        if (p.EndsWith("_norm.tex", StringComparison.OrdinalIgnoreCase))
+            return p[..^"_norm.tex".Length] + "_mask" + ext;
+        if (p.EndsWith("_d.tex", StringComparison.OrdinalIgnoreCase))
+            return p[..^"_d.tex".Length] + "_m" + ext;
+        if (p.EndsWith("_n.tex", StringComparison.OrdinalIgnoreCase))
+            return p[..^"_n.tex".Length] + "_m" + ext;
+
+        if (EndsWithToken(p, "_base"))
+            return p[..^("_base".Length + ext.Length)] + "_mask" + ext;
+        if (EndsWithToken(p, "_norm"))
+            return p[..^("_norm".Length + ext.Length)] + "_mask" + ext;
+        if (EndsWithToken(p, "_d"))
+            return p[..^("_d".Length + ext.Length)] + "_m" + ext;
+        if (EndsWithToken(p, "_n"))
+            return p[..^("_n".Length + ext.Length)] + "_m" + ext;
+
+        return null;
+    }
+
+    // ── Center Panel: Interactive UV Canvas ──────────────────────────────────
     //
     // Coordinate system:
     //   "virtual UV" = square [0,1]x[0,1] representing maxDim x maxDim pixels
@@ -30,33 +90,48 @@ public partial class MainWindow
 
     private void DrawCanvas()
     {
+        SyncCanvasMapModeFromSelectedLayer();
+
         var btnH = ImGui.GetFrameHeight();
         ImGui.AlignTextToFramePadding();
         ImGui.Text(Strings.T("label.uv_scale"));
-        ImGui.SameLine();
+
+        var spacing = ImGui.GetStyle().ItemSpacing.X;
+        var contentMaxX = ImGui.GetWindowContentRegionMax().X;
+        bool TrySameLine(float nextItemWidth, float spacingX = -1f)
+        {
+            var gap = spacingX >= 0f ? spacingX : spacing;
+            var nextX = ImGui.GetCursorPosX() + gap + nextItemWidth;
+            if (nextX <= contentMaxX)
+            {
+                ImGui.SameLine(0f, gap);
+                return true;
+            }
+            return false;
+        }
+
+        const float minZoomSliderW = 140f;
+        if (!TrySameLine(minZoomSliderW))
+            ImGui.NewLine();
 
         var fitBtnW = 44f;
         var uvMeshBtnW = ImGui.CalcTextSize(Strings.T("button.uv_mesh")).X + ImGui.GetStyle().FramePadding.X * 2;
         var colorBtnW = ImGui.GetFrameHeight();
-        var spacing = ImGui.GetStyle().ItemSpacing.X;
         var hasMesh = previewService.CurrentMesh != null;
 
-        // Reserve space for buttons on the right
-        var rightBtns = fitBtnW + uvMeshBtnW + spacing * 2
-                        + (showUvWireframe ? colorBtnW + spacing : 0);
-        var sliderW = ImGui.GetContentRegionAvail().X - rightBtns;
+        var sliderW = MathF.Max(minZoomSliderW, MathF.Min(280f, ImGui.GetContentRegionAvail().X));
         ImGui.SetNextItemWidth(sliderW);
         ImGui.SliderFloat("##zoom", ref canvasZoom, 0.1f, 5.0f, $"{canvasZoom * 100:F0}%%");
         if (ImGui.IsItemHovered()) ImGui.SetTooltip(Strings.T("tooltip.canvas_zoom"));
 
-        ImGui.SameLine();
+        TrySameLine(fitBtnW);
         if (ImGui.Button(Strings.T("button.fit"), new Vector2(fitBtnW, btnH)))
         {
             canvasZoom = 1.0f;
             canvasPan = Vector2.Zero;
         }
 
-        ImGui.SameLine();
+        TrySameLine(uvMeshBtnW);
         var activeColor = showUvWireframe && hasMesh
             ? new Vector4(0.4f, 0.8f, 1f, 1f)
             : new Vector4(0.5f, 0.5f, 0.5f, 1f);
@@ -74,7 +149,7 @@ public partial class MainWindow
 
         if (showUvWireframe)
         {
-            ImGui.SameLine();
+            TrySameLine(colorBtnW);
             var wc = new Vector4(config.UvWireframeColorR, config.UvWireframeColorG,
                 config.UvWireframeColorB, config.UvWireframeColorA);
             if (ImGui.ColorButton("##wireColor", wc, ImGuiColorEditFlags.AlphaPreview, new Vector2(colorBtnW, btnH)))
@@ -94,6 +169,49 @@ public partial class MainWindow
                 ImGui.EndPopup();
             }
         }
+
+        //ImGui.NewLine();
+        ImGui.AlignTextToFramePadding();
+        ImGui.Text(Strings.T("label.canvas_map"));
+        ImGui.SameLine();
+
+        var mapMode = CanvasMapMode;
+        ImGui.SetNextItemWidth(100f);
+        if (ImGui.BeginCombo("##canvasMap", Strings.T($"canvas_map.{mapMode.ToString().ToLowerInvariant()}")))
+        {
+            foreach (TargetMap m in System.Enum.GetValues<TargetMap>())
+            {
+                var label = Strings.T($"canvas_map.{m.ToString().ToLowerInvariant()}");
+                if (ImGui.Selectable(label, mapMode == m))
+                {
+                    CanvasMapMode = m;
+                    SaveCanvasViewSettings();
+                }
+            }
+            ImGui.EndCombo();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(Strings.T("tooltip.canvas_map"));
+
+        ImGui.SameLine();
+        var currentOnly = previewCurrentLayerOnly;
+        if (ImGui.Checkbox(Strings.T("checkbox.preview_current_layer"), ref currentOnly))
+        {
+            previewCurrentLayerOnly = currentOnly;
+            SaveCanvasViewSettings();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(Strings.T("tooltip.preview_current_layer"));
+
+        ImGui.SameLine();
+        var showBase = showCanvasBaseTexture;
+        if (ImGui.Checkbox(Strings.T("checkbox.canvas_show_base"), ref showBase))
+        {
+            showCanvasBaseTexture = showBase;
+            SaveCanvasViewSettings();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(Strings.T("tooltip.canvas_show_base"));
 
         var avail = ImGui.GetContentRegionAvail();
         var canvasSize = new Vector2(avail.X, avail.Y);
@@ -128,7 +246,7 @@ public partial class MainWindow
         var texScreenOrigin = uvOrigin + texOffset * fitSize;
         var texScreenSize = uvScale * fitSize;
         DrawCheckerboard(drawList, texScreenOrigin, texScreenSize);
-        DrawBaseTexture(drawList, texScreenOrigin, texScreenSize);
+        bool hasBaseTexture = DrawBaseTexture(drawList, texScreenOrigin, texScreenSize);
 
         if (showUvWireframe)
             DrawUvWireframe(drawList, uvOrigin, fitSize, uvScale, canvasPos, canvasSize);
@@ -139,6 +257,19 @@ public partial class MainWindow
             ImGui.GetColorU32(new Vector4(0.4f, 0.4f, 0.4f, 1f)));
 
         DrawRulers(drawList, canvasPos, canvasSize, texScreenOrigin, texScreenSize);
+
+        if (!hasBaseTexture)
+        {
+            var missingText = Strings.T("hint.canvas_map_base_missing");
+            var missingSize = ImGui.CalcTextSize(missingText);
+            var missingPos = new Vector2(
+                texScreenOrigin.X + (texScreenSize.X - missingSize.X) * 0.5f,
+                texScreenOrigin.Y + (texScreenSize.Y - missingSize.Y) * 0.5f);
+            var bgColor = ImGui.GetColorU32(new Vector4(0f, 0f, 0f, 0.55f));
+            var textColor = ImGui.GetColorU32(new Vector4(0.9f, 0.9f, 0.9f, 1f));
+            drawList.AddRectFilled(missingPos - new Vector2(4, 2), missingPos + missingSize + new Vector2(4, 2), bgColor);
+            drawList.AddText(missingPos, textColor, missingText);
+        }
 
         drawList.PopClipRect();
 
@@ -306,22 +437,143 @@ public partial class MainWindow
         }
     }
 
-    private void DrawBaseTexture(ImDrawListPtr drawList, Vector2 texOrigin, Vector2 texSize)
+    private IDalamudTextureWrap? GetCanvasOverlayWrap(string imagePath)
     {
-        lastBaseTexWidth = 0;
-        lastBaseTexHeight = 0;
-        var group = project.SelectedGroup;
-        if (group == null) return;
-
-        var texDiskPath = group.DiffuseDiskPath;
-        var texGamePath = group.DiffuseGamePath;
-        if (string.IsNullOrEmpty(texDiskPath) && string.IsNullOrEmpty(texGamePath)) return;
+        if (string.IsNullOrEmpty(imagePath) || !File.Exists(imagePath)) return null;
 
         try
         {
-            var shared = !string.IsNullOrEmpty(texDiskPath) && File.Exists(texDiskPath)
-                ? textureProvider.GetFromFile(texDiskPath)
-                : textureProvider.GetFromGame(texGamePath ?? "");
+            var shared = textureProvider.GetFromFile(imagePath).GetWrapOrDefault();
+            if (shared != null) return shared;
+        }
+        catch { }
+
+        if (imageLoader == null) return null;
+
+        FileInfo fi;
+        try
+        {
+            fi = new FileInfo(imagePath);
+            if (!fi.Exists) return null;
+        }
+        catch
+        {
+            return null;
+        }
+
+        var absPath = Path.GetFullPath(imagePath);
+        if (canvasOverlayTexCache.TryGetValue(absPath, out var hit)
+            && hit.Mtime == fi.LastWriteTimeUtc && hit.Size == fi.Length)
+            return hit.Wrap;
+
+        if (hit != null)
+        {
+            try { hit.Wrap.Dispose(); } catch { }
+            canvasOverlayTexCache.Remove(absPath);
+        }
+
+        var img = imageLoader.LoadImage(absPath, useCache: false);
+        if (!img.HasValue) return null;
+        var (data, w, h) = img.Value;
+        try
+        {
+            var wrap = textureProvider.CreateFromRaw(
+                RawImageSpecification.Rgba32(w, h),
+                data,
+                $"SkinTattoo/canvas/{Path.GetFileName(absPath)}");
+            canvasOverlayTexCache[absPath] = new CanvasOverlayTexCacheEntry(wrap, fi.LastWriteTimeUtc, fi.Length);
+            return wrap;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private void DisposeCanvasOverlayTexCache()
+    {
+        foreach (var e in canvasOverlayTexCache.Values)
+        {
+            try { e.Wrap.Dispose(); } catch { }
+        }
+        canvasOverlayTexCache.Clear();
+    }
+
+    private bool DrawBaseTexture(ImDrawListPtr drawList, Vector2 texOrigin, Vector2 texSize)
+    {
+        var previousBaseWidth = lastBaseTexWidth > 0 ? lastBaseTexWidth : 1024;
+        var previousBaseHeight = lastBaseTexHeight > 0 ? lastBaseTexHeight : 1024;
+        lastBaseTexWidth = 0;
+        lastBaseTexHeight = 0;
+        var group = project.SelectedGroup;
+        if (group == null) return false;
+
+        if (!showCanvasBaseTexture)
+        {
+            lastBaseTexWidth = previousBaseWidth;
+            lastBaseTexHeight = previousBaseHeight;
+            return false;
+        }
+
+        string? texDiskPath;
+        string? texGamePath;
+
+        if (CanvasMapMode == TargetMap.Normal)
+        {
+            texDiskPath = group.OrigNormDiskPath ?? group.NormDiskPath;
+            texGamePath = group.NormGamePath;
+        }
+        else if (CanvasMapMode == TargetMap.Mask)
+        {
+            // Resolve mask game path from material sampler
+            texDiskPath = null;
+            texGamePath = null;
+            if (previewService.TryGetMaskGamePath(group, out var maskPath))
+                texGamePath = maskPath;
+
+            // Fallback: derive sibling mask DISK path from current local diffuse/normal
+            // textures. This is needed for modded/custom assets where mtrl sampler parsing
+            // can fail or the game path doesn't exist in SqPack, but disk siblings do.
+            texDiskPath = GuessMaskPathFromSibling(group.OrigDiffuseDiskPath ?? group.DiffuseDiskPath)
+                       ?? GuessMaskPathFromSibling(group.OrigNormDiskPath ?? group.NormDiskPath);
+            if (!string.IsNullOrEmpty(texDiskPath) && !File.Exists(texDiskPath))
+                texDiskPath = null;
+
+            // Fallback: derive sibling mask path from known diffuse/normal names
+            // for materials where mtrl sampler parsing fails but standard *_mask
+            // files still exist.
+            texGamePath ??= GuessMaskPathFromSibling(group.DiffuseGamePath)
+                          ?? GuessMaskPathFromSibling(group.NormGamePath);
+        }
+        else
+        {
+            texDiskPath = group.DiffuseDiskPath;
+            texGamePath = group.DiffuseGamePath;
+        }
+
+        if (string.IsNullOrEmpty(texDiskPath) && string.IsNullOrEmpty(texGamePath))
+        {
+            lastBaseTexWidth = previousBaseWidth;
+            lastBaseTexHeight = previousBaseHeight;
+            return false;
+        }
+
+        try
+        {
+            var normalizedGamePath = (texGamePath ?? string.Empty).Replace('\\', '/');
+            var stagedDiskPath = !string.IsNullOrEmpty(normalizedGamePath)
+                ? previewService.GetStagedDiskPath(normalizedGamePath)
+                : null;
+            if (string.IsNullOrEmpty(stagedDiskPath) && !string.IsNullOrEmpty(texGamePath))
+                stagedDiskPath = previewService.GetStagedDiskPath(texGamePath);
+
+            var diskPath = !string.IsNullOrEmpty(texDiskPath) && File.Exists(texDiskPath)
+                ? texDiskPath
+                : (!string.IsNullOrEmpty(stagedDiskPath) && File.Exists(stagedDiskPath) ? stagedDiskPath : null);
+
+            var shared = !string.IsNullOrEmpty(diskPath)
+                ? textureProvider.GetFromFile(diskPath)
+                : textureProvider.GetFromGame(normalizedGamePath);
             var wrap = shared.GetWrapOrDefault();
             if (wrap != null)
             {
@@ -330,9 +582,14 @@ public partial class MainWindow
                 drawList.AddImage(wrap.Handle,
                     texOrigin, texOrigin + texSize,
                     Vector2.Zero, Vector2.One);
+                return true;
             }
         }
         catch { }
+
+        lastBaseTexWidth = previousBaseWidth;
+        lastBaseTexHeight = previousBaseHeight;
+        return false;
     }
 
     private void DrawLayerOverlays(ImDrawListPtr drawList, Vector2 uvOrigin, Vector2 fitSize,
@@ -343,8 +600,12 @@ public partial class MainWindow
 
         for (var i = 0; i < group.Layers.Count; i++)
         {
+            if (previewCurrentLayerOnly && i != group.SelectedLayerIndex)
+                continue;
+
             var layer = group.Layers[i];
             if (!layer.IsVisible || string.IsNullOrEmpty(layer.ImagePath)) continue;
+            if (layer.TargetMap != CanvasMapMode) continue;
 
             var isSelected = group.SelectedLayerIndex == i;
 
@@ -417,7 +678,7 @@ public partial class MainWindow
             {
                 if (File.Exists(layer.ImagePath))
                 {
-                    var wrap = textureProvider.GetFromFile(layer.ImagePath).GetWrapOrDefault();
+                    var wrap = GetCanvasOverlayWrap(layer.ImagePath);
                     if (wrap != null)
                     {
                         var alpha = (uint)(layer.Opacity * 255) << 24 | 0x00FFFFFF;

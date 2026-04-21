@@ -7,6 +7,7 @@ public sealed class LibraryEntry
     public string Hash { get; set; } = "";
     public string FileName { get; set; } = "";
     public string OriginalName { get; set; } = "";
+    public string FolderPath { get; set; } = "";
     public DateTime AddedAt { get; set; }
     public DateTime LastUsedAt { get; set; }
     public int UseCount { get; set; }

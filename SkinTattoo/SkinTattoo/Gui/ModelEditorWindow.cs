@@ -44,14 +44,8 @@ public class ModelEditorWindow : Window, IDisposable
     private static SharpDX.Vector3 ToSDX(Vector3 v) => new(v.X, v.Y, v.Z);
     private static Vector3 FromSDX(SharpDX.Vector3 v) => new(v.X, v.Y, v.Z);
 
-    public ModelEditorWindow(
-        DecalProject project,
-        PreviewService previewService,
-        PenumbraBridge penumbra,
-        SkinMeshResolver skinMeshResolver,
-        nint deviceHandle)
-        : base(Strings.T("window.editor3d.title") + "###SkinTattooModelEditor",
-               ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)
+    public ModelEditorWindow(DecalProject project, PreviewService previewService, PenumbraBridge penumbra, SkinMeshResolver skinMeshResolver, nint deviceHandle)
+        : base(Strings.T("window.editor3d.title") + "###SkinTattooModelEditor", ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)
     {
         this.project = project;
         this.previewService = previewService;

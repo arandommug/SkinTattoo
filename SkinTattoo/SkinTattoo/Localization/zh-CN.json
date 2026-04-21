@@ -29,22 +29,47 @@
       "title": "贴花素材库"
     }
   },
+  "changelog": {
+    "empty": "暂无更新日志"
+  },
   "library": {
     "search_hint": "搜索文件名...",
     "empty": "素材库为空，点击左上角按钮导入。",
     "loading": "加载中",
+    "na": "N/A",
+    "view": {
+      "label": "视图",
+      "large": "大图标",
+      "medium": "中图标",
+      "small": "小图标",
+      "detail": "详细信息"
+    },
+    "detail": {
+      "name": "名称",
+      "type": "类型",
+      "folder_type": "文件夹",
+      "size": "大小",
+      "added": "添加时间"
+    },
+    "folder": {
+      "all": "全部",
+      "name_hint": "文件夹名称"
+    },
+    "import_folder_hint": "文件夹路径...",
+    "import_folder_button": "导入文件夹",
+    "import_folder_result": "已导入 {0} 张图片。",
     "delete_prompt": "确认删除 \"{0}\"？\n正在使用该素材的图层不会被自动清理。",
     "tooltip": {
       "import": "导入新素材",
+      "import_folder": "导入文件夹",
+      "create_folder": "创建文件夹",
+      "up_folder": "返回上级文件夹",
       "used_count": "使用次数: {0}"
     },
     "menu": {
       "apply": "应用到当前图层",
       "delete": "从素材库中删除"
     }
-  },
-  "changelog": {
-    "empty": "暂无更新日志"
   },
   "tab": {
     "settings": "设置",
@@ -56,7 +81,7 @@
     "add": "添加",
     "export_local": "导出到本地",
     "export_penumbra": "安装到 Penumbra",
-    "exporting": "导出中...",
+    "exporting": "导出中…",
     "close": "关闭",
     "browse": "浏览...",
     "refresh": "刷新",
@@ -76,18 +101,18 @@
     "multi_select": "进入多选",
     "exit_multi_select": "退出多选",
     "copy": "复制",
-    "rotate_ccw_90": "逆时针 90deg",
-    "rotate_cw_90": "顺时针 90deg",
+    "rotate_ccw_90": "逆时针 90°",
+    "rotate_cw_90": "顺时针 90°",
     "mirror_x": "水平镜像",
     "mirror_y": "垂直镜像",
     "path": "路径",
     "remove": "移除",
     "save_mod": "保存 Mod",
-    "browse_output": "浏览...",
-    "confirm": "确认",
-    "cancel": "取消",
+    "browse_output": "浏览…",
     "browse_image": "浏览文件",
-    "open_library": "素材库"
+    "open_library": "素材库",
+    "confirm": "确认",
+    "cancel": "取消"
   },
   "tooltip": {
     "editor3d": "3D 贴花编辑器",
@@ -133,6 +158,9 @@
     "show_hide_model": "显示/隐藏",
     "re_resolve_tip": "重新检测角色当前装备/mod 状态并刷新网格",
     "browse_image": "浏览...",
+    "preview_current_layer": "仅显示当前选中图层的预览叠加；关闭后显示所有图层的叠加结果。",
+    "canvas_map": "选择编辑器预览中显示的贴图类型。\n漫反射 — 颜色/反照率\n法线 — 法线贴图\n遮罩 — 材质遮罩（高光/粗糙度）",
+    "canvas_show_base": "显示/隐藏当前贴图类型的基础贴图（叠加层背景）",
     "open_library": "打开贴花素材库"
   },
   "label": {
@@ -196,7 +224,8 @@
     "actual_path": "实际路径",
     "tex_diffuse_header": "贴图 (Diffuse)",
     "tex_normal_header": "贴图 (Normal)",
-    "copy_clipboard": "一键复制全部 (markdown)"
+    "copy_clipboard": "一键复制全部 (markdown)",
+    "canvas_map": "预览贴图"
   },
   "section": {
     "image": "贴花图片",
@@ -213,7 +242,9 @@
     "uv_aa": "抗锯齿##uvAA",
     "uv_cull": "视口外剔除##uvCull",
     "uv_dedup": "共享边去重##uvDedup",
-    "http_enable": "启用 HTTP 服务器##httpEn"
+    "http_enable": "启用 HTTP 服务器##httpEn",
+    "preview_current_layer": "仅预览当前图层",
+    "canvas_show_base": "显示基础贴图"
   },
   "menu": {
     "copy_decal_group": "复制贴花组",
@@ -236,12 +267,17 @@
     "linear": "线性",
     "bidir": "双向"
   },
+  "canvas_map": {
+    "diffuse": "漫反射",
+    "normal": "法线",
+    "mask": "遮罩"
+  },
   "target_map": {
     "label": "目标贴图",
     "diffuse": "Diffuse",
     "mask": "Mask",
     "normal": "Normal",
-    "tooltip": "贴花画到哪张游戏贴图上。\nDiffuse -- 颜色，默认\nMask -- 材质遮罩，高光/粗糙度\nNormal -- 法线贴图，凹凸细节",
+    "tooltip": "贴花画到哪张游戏贴图上。\nDiffuse — 颜色，默认\nMask — 材质遮罩，高光/粗糙度\nNormal — 法线贴图，凹凸细节",
     "auto_normal_detected": "检测到这像法线贴图，目标已自动设为 Normal。"
   },
   "emissive_normal": {
@@ -339,9 +375,9 @@
     "canvas_mods": "Shift:锁定X移动  Ctrl:锁定Y移动  Alt:右键变旋转",
     "viewport_ops": "左键:放置贴花  右键:旋转相机  中键:平移相机",
     "viewport_scroll": "滚轮:缩放贴花  Ctrl+滚轮:缩放相机",
-    "loading": "加载中...",
+    "loading": "加载中…",
     "loading_sub": "正在加载模型与贴花，请稍候",
-    "char_redrawing": "角色重绘中...",
+    "char_redrawing": "角色重绘中…",
     "char_redrawing_sub": "完成后自动刷新资源树",
     "no_resources": "点击「刷新资源」查询玩家资源",
     "no_model_detected": "未检测到角色模型",
@@ -349,7 +385,8 @@
     "model_list": "模型列表:",
     "empty_group_list": "点击 + 添加目标材质",
     "no_layer_groups": "（项目中没有图层组）",
-    "layer_group_fmt": "{0} ({1} 图层)"
+    "layer_group_fmt": "{0} ({1} 图层)",
+    "canvas_map_base_missing": "当前目标缺少基础贴图，仅显示叠加层。"
   },
   "dialog": {
     "select_image": "选择贴花图片",

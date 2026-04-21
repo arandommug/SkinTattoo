@@ -31,8 +31,70 @@ public sealed class LibraryService
 
     private readonly object sync = new();
     private readonly Dictionary<string, LibraryEntry> entries = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> folders = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly HashSet<string> pendingThumbs = new(StringComparer.OrdinalIgnoreCase);
+
+    private static readonly HashSet<string> ImportImageExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".png", ".jpg", ".jpeg", ".tga", ".bmp", ".dds", ".tex"
+    };
+
+    private sealed class LibraryIndexModel
+    {
+        public List<LibraryEntry> Entries { get; set; } = [];
+        public List<string> Folders { get; set; } = [];
+    }
+
+    public int ImportFolderTree(string sourceRoot)
+    {
+        if (string.IsNullOrWhiteSpace(sourceRoot) || !Directory.Exists(sourceRoot))
+            return 0;
+
+        var root = Path.GetFullPath(sourceRoot);
+        var rootFolderName = NormalizeFolderPath(Path.GetFileName(Path.TrimEndingDirectorySeparator(root)));
+        var files = Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories);
+        int imported = 0;
+
+        foreach (var file in files)
+        {
+            var ext = Path.GetExtension(file);
+            if (!ImportImageExtensions.Contains(ext))
+                continue;
+
+            var entry = ImportFromPath(file);
+            if (entry == null)
+                continue;
+
+            string relativeDir;
+            try
+            {
+                relativeDir = Path.GetRelativePath(root, Path.GetDirectoryName(file) ?? string.Empty);
+            }
+            catch
+            {
+                relativeDir = string.Empty;
+            }
+
+            var relativeFolder = NormalizeFolderPath(relativeDir);
+            var folder = string.IsNullOrEmpty(rootFolderName)
+                ? relativeFolder
+                : string.IsNullOrEmpty(relativeFolder)
+                    ? rootFolderName
+                    : NormalizeFolderPath(rootFolderName + "/" + relativeFolder);
+            lock (sync)
+            {
+                entry.FolderPath = folder;
+                EnsureFolderTrackedLocked(folder);
+                entries[entry.Hash] = entry;
+                SaveIndexLocked();
+            }
+
+            imported++;
+        }
+
+        return imported;
+    }
 
     public LibraryService(IPluginLog log, DecalImageLoader imageLoader, string pluginConfigDir)
     {
@@ -58,11 +120,88 @@ public sealed class LibraryService
                 .ToList();
     }
 
+    public IReadOnlyList<string> SnapshotFolders()
+    {
+        lock (sync)
+            return folders.OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    public static string NormalizeFolderPath(string? folderPath)
+    {
+        if (string.IsNullOrWhiteSpace(folderPath)) return string.Empty;
+        var p = folderPath.Replace('\\', '/').Trim();
+        while (p.StartsWith('/')) p = p[1..];
+        while (p.EndsWith('/')) p = p[..^1];
+        if (string.IsNullOrWhiteSpace(p)) return string.Empty;
+
+        var parts = p.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var normalizedParts = new List<string>(parts.Length);
+        foreach (var part in parts)
+        {
+            if (part == ".") continue;
+            if (part == "..")
+            {
+                if (normalizedParts.Count > 0)
+                    normalizedParts.RemoveAt(normalizedParts.Count - 1);
+                continue;
+            }
+            normalizedParts.Add(part);
+        }
+
+        return string.Join('/', normalizedParts);
+    }
+
+    public IReadOnlyList<LibraryEntry> SnapshotByFolder(string? folderPath)
+    {
+        var target = NormalizeFolderPath(folderPath);
+        lock (sync)
+            return entries.Values
+                .Where(e => string.Equals(NormalizeFolderPath(e.FolderPath), target, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(e => e.LastUsedAt)
+                .ThenByDescending(e => e.AddedAt)
+                .ToList();
+    }
+
+    public bool CreateFolder(string? folderPath)
+    {
+        var normalized = NormalizeFolderPath(folderPath);
+        if (string.IsNullOrEmpty(normalized)) return false;
+
+        lock (sync)
+        {
+            if (!folders.Add(normalized)) return false;
+            SaveIndexLocked();
+            return true;
+        }
+    }
+
+    public bool SetEntryFolder(string hash, string? folderPath)
+    {
+        if (string.IsNullOrWhiteSpace(hash)) return false;
+        var normalized = NormalizeFolderPath(folderPath);
+
+        lock (sync)
+        {
+            if (!entries.TryGetValue(hash, out var entry)) return false;
+            entry.FolderPath = normalized;
+            EnsureFolderTrackedLocked(normalized);
+            SaveIndexLocked();
+            return true;
+        }
+    }
+
     public LibraryEntry? Get(string hash)
     {
         if (string.IsNullOrEmpty(hash)) return null;
         lock (sync)
             return entries.TryGetValue(hash, out var e) ? e : null;
+    }
+
+    private void EnsureFolderTrackedLocked(string? folderPath)
+    {
+        var normalized = NormalizeFolderPath(folderPath);
+        if (string.IsNullOrEmpty(normalized)) return;
+        folders.Add(normalized);
     }
 
     public string? ResolveDiskPath(string hash)
@@ -111,6 +250,7 @@ public sealed class LibraryService
         {
             if (entries.TryGetValue(hash, out var existing))
             {
+                existing.FolderPath = NormalizeFolderPath(existing.FolderPath);
                 existing.LastUsedAt = DateTime.UtcNow;
                 existing.UseCount++;
                 SaveIndexLocked();
@@ -141,6 +281,7 @@ public sealed class LibraryService
             Hash = hash,
             FileName = fileName,
             OriginalName = Path.GetFileName(sourcePath),
+            FolderPath = string.Empty,
             AddedAt = DateTime.UtcNow,
             LastUsedAt = DateTime.UtcNow,
             UseCount = 1,
@@ -151,6 +292,7 @@ public sealed class LibraryService
         lock (sync)
         {
             entries[hash] = entry;
+            EnsureFolderTrackedLocked(entry.FolderPath);
             SaveIndexLocked();
             QueueThumbIfMissingLocked(entry);
         }
@@ -191,15 +333,27 @@ public sealed class LibraryService
         try
         {
             var json = File.ReadAllText(indexPath);
-            var list = JsonSerializer.Deserialize<List<LibraryEntry>>(json);
+            var model = JsonSerializer.Deserialize<LibraryIndexModel>(json);
+            List<LibraryEntry>? list = model?.Entries;
+            if (list == null || list.Count == 0)
+                list = JsonSerializer.Deserialize<List<LibraryEntry>>(json);
             if (list == null) return;
             lock (sync)
             {
                 entries.Clear();
+                folders.Clear();
                 foreach (var e in list)
                 {
                     if (string.IsNullOrEmpty(e.Hash) || string.IsNullOrEmpty(e.FileName)) continue;
+                    e.FolderPath = NormalizeFolderPath(e.FolderPath);
                     entries[e.Hash] = e;
+                    EnsureFolderTrackedLocked(e.FolderPath);
+                }
+
+                if (model != null)
+                {
+                    foreach (var f in model.Folders)
+                        EnsureFolderTrackedLocked(f);
                 }
             }
         }
@@ -213,8 +367,12 @@ public sealed class LibraryService
     {
         try
         {
-            var list = entries.Values.ToList();
-            var json = JsonSerializer.Serialize(list, new JsonSerializerOptions { WriteIndented = true });
+            var model = new LibraryIndexModel
+            {
+                Entries = entries.Values.ToList(),
+                Folders = folders.OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToList(),
+            };
+            var json = JsonSerializer.Serialize(model, new JsonSerializerOptions { WriteIndented = true });
             var tmp = indexPath + ".tmp";
             File.WriteAllText(tmp, json);
             if (File.Exists(indexPath)) File.Replace(tmp, indexPath, null);
