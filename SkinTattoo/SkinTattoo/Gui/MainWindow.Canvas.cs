@@ -93,7 +93,10 @@ public partial class MainWindow
             : new Vector4(0.5f, 0.5f, 0.5f, 1f);
         ImGui.PushStyleColor(ImGuiCol.Text, activeColor);
         if (ImGui.Button(Strings.T("button.uv_mesh"), new Vector2(uvMeshBtnW, btnH)))
+        {
             showUvWireframe = !showUvWireframe;
+            SaveCanvasViewSettings();
+        }
         ImGui.PopStyleColor();
         if (ImGui.IsItemHovered())
         {

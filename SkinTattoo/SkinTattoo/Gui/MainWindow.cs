@@ -224,6 +224,7 @@ public partial class MainWindow : Window, IDisposable
         };
         previewCurrentLayerOnly = config.UvCurrentDecalOnly;
         showCanvasBaseTexture = config.UvShowBaseTexture;
+        showUvWireframe = config.UvShowWireframe;
     }
 
     private void InitializeHistoryTrackerIfNeeded()
@@ -483,6 +484,7 @@ public partial class MainWindow : Window, IDisposable
         config.UvViewTargetMap = (int)CanvasMapMode;
         config.UvCurrentDecalOnly = previewCurrentLayerOnly;
         config.UvShowBaseTexture = showCanvasBaseTexture;
+        config.UvShowWireframe = showUvWireframe;
         config.Save();
     }
 

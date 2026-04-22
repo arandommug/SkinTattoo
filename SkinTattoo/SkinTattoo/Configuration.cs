@@ -134,6 +134,7 @@ public class Configuration : IPluginConfiguration
     public int UvViewTargetMap { get; set; } = 0;
     public bool UvCurrentDecalOnly { get; set; } = false;
     public bool UvShowBaseTexture { get; set; } = true;
+    public bool UvShowWireframe { get; set; } = false;
 
     // Modifier keys required to enable destructive actions (delete layer/group).
     // Bit 0 = Ctrl, bit 1 = Shift, bit 2 = Alt. Default = Ctrl+Shift (3).
