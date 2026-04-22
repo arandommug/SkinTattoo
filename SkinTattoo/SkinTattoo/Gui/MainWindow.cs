@@ -31,6 +31,7 @@ public partial class MainWindow : Window, IDisposable
     private readonly ChangelogService changelogService;
     private readonly LibraryService? library;
     private readonly DecalImageLoader? imageLoader;
+    private readonly IKeyState keyState;
     private readonly FileDialogManager fileDialog = new();
 
     private string imagePathBuf = string.Empty;
@@ -86,9 +87,11 @@ public partial class MainWindow : Window, IDisposable
 
     private const int HistoryMaxDepth = 100;
     private const double HistoryCoalesceMs = 250;
+    private readonly List<SavedProjectSnapshot> undoHistory = [];
+    private readonly List<SavedProjectSnapshot> redoHistory = [];
     private bool isReplayingHistory;
     private SavedProjectSnapshot? historyBaselineSnapshot;
-    private string? historyBaselineSignature;
+    private int historyBaselineSignature;
     private DateTime historyLastCommitUtc = DateTime.MinValue;
     private bool historyTrackerInitialized;
 
@@ -185,6 +188,7 @@ public partial class MainWindow : Window, IDisposable
         IDataManager dataManager,
         Mesh.SkinMeshResolver skinMeshResolver,
         ChangelogService changelogService,
+        IKeyState keyState,
         LibraryService? library = null,
         DecalImageLoader? imageLoader = null)
         : base(Strings.T("window.main.title") + "###SkinTattooMain",
@@ -198,6 +202,7 @@ public partial class MainWindow : Window, IDisposable
         this.dataManager = dataManager;
         this.skinMeshResolver = skinMeshResolver;
         this.changelogService = changelogService;
+        this.keyState = keyState;
         this.library = library;
         this.imageLoader = imageLoader;
 
@@ -219,35 +224,25 @@ public partial class MainWindow : Window, IDisposable
         };
         previewCurrentLayerOnly = config.UvCurrentDecalOnly;
         showCanvasBaseTexture = config.UvShowBaseTexture;
-        EnsureHistoryState();
-    }
-
-    private void EnsureHistoryState()
-    {
-        config.UndoHistory ??= [];
-        config.RedoHistory ??= [];
-        TrimHistory(config.UndoHistory);
-        TrimHistory(config.RedoHistory);
     }
 
     private void InitializeHistoryTrackerIfNeeded()
     {
         if (historyTrackerInitialized) return;
-
-        EnsureHistoryState();
-        ResetHistoryTrackerBaseline(project.CreateSnapshot());
+        ResetHistoryTrackerBaseline();
         historyTrackerInitialized = true;
     }
 
-    private void ResetHistoryTrackerBaseline(SavedProjectSnapshot? snapshot = null)
+    private void ResetHistoryTrackerBaseline()
     {
-        var baseline = snapshot ?? project.CreateSnapshot();
-        historyBaselineSnapshot = baseline;
-        historyBaselineSignature = ComputeSnapshotSignature(baseline);
+        historyBaselineSnapshot = project.CreateSnapshot();
+        historyBaselineSignature = ComputeProjectSignature(project);
         historyLastCommitUtc = DateTime.UtcNow;
     }
 
-    private static string ComputeSnapshotSignature(SavedProjectSnapshot snapshot)
+    // Computed directly off DecalProject to avoid per-frame SavedProjectSnapshot allocation.
+    // Must mirror the fields emitted by DecalProject.SerializeLayer/SerializeGroup.
+    private static int ComputeProjectSignature(DecalProject project)
     {
         var hash = new HashCode();
 
@@ -256,10 +251,10 @@ public partial class MainWindow : Window, IDisposable
             h.Add(value ?? string.Empty, StringComparer.Ordinal);
         }
 
-        hash.Add(snapshot.SelectedGroupIndex);
-        hash.Add(snapshot.TargetGroups.Count);
+        hash.Add(project.SelectedGroupIndex);
+        hash.Add(project.Groups.Count);
 
-        foreach (var group in snapshot.TargetGroups)
+        foreach (var group in project.Groups)
         {
             AddString(ref hash, group.Name);
             AddString(ref hash, group.DiffuseGamePath);
@@ -283,48 +278,48 @@ public partial class MainWindow : Window, IDisposable
                 AddString(ref hash, layer.Name);
                 AddString(ref hash, layer.ImagePath);
                 AddString(ref hash, layer.ImageHash);
-                hash.Add(layer.UvCenterX);
-                hash.Add(layer.UvCenterY);
-                hash.Add(layer.UvScaleX);
-                hash.Add(layer.UvScaleY);
+                hash.Add(layer.UvCenter.X);
+                hash.Add(layer.UvCenter.Y);
+                hash.Add(layer.UvScale.X);
+                hash.Add(layer.UvScale.Y);
                 hash.Add(layer.RotationDeg);
                 hash.Add(layer.Opacity);
-                hash.Add(layer.BlendMode);
+                hash.Add((int)layer.BlendMode);
                 hash.Add(layer.IsVisible);
                 hash.Add(layer.AffectsDiffuse);
                 hash.Add(layer.AffectsEmissive);
-                hash.Add(layer.EmissiveColorR);
-                hash.Add(layer.EmissiveColorG);
-                hash.Add(layer.EmissiveColorB);
+                hash.Add(layer.EmissiveColor.X);
+                hash.Add(layer.EmissiveColor.Y);
+                hash.Add(layer.EmissiveColor.Z);
                 hash.Add(layer.EmissiveIntensity);
-                hash.Add(layer.AnimMode);
+                hash.Add((int)layer.AnimMode);
                 hash.Add(layer.AnimSpeed);
                 hash.Add(layer.AnimAmplitude);
-                hash.Add(layer.EmissiveColorB_R);
-                hash.Add(layer.EmissiveColorB_G);
-                hash.Add(layer.EmissiveColorB_B);
+                hash.Add(layer.EmissiveColorB.X);
+                hash.Add(layer.EmissiveColorB.Y);
+                hash.Add(layer.EmissiveColorB.Z);
                 hash.Add(layer.AnimFreq);
-                hash.Add(layer.AnimDirMode);
+                hash.Add((int)layer.AnimDirMode);
                 hash.Add(layer.AnimDirAngle);
                 hash.Add(layer.AnimDualColor);
-                hash.Add(layer.EmissiveMask);
-                hash.Add(layer.EmissiveMaskFalloff);
+                hash.Add((int)layer.FadeMask);
+                hash.Add(layer.FadeMaskFalloff);
                 hash.Add(layer.GradientAngleDeg);
                 hash.Add(layer.GradientScale);
                 hash.Add(layer.GradientOffset);
-                hash.Add(layer.Clip);
-                hash.Add(layer.Kind);
-                hash.Add(layer.TargetMap);
+                hash.Add((int)layer.Clip);
+                hash.Add((int)layer.Kind);
+                hash.Add((int)layer.TargetMap);
                 hash.Add(layer.AffectsSpecular);
                 hash.Add(layer.AffectsRoughness);
                 hash.Add(layer.AffectsMetalness);
                 hash.Add(layer.AffectsSheen);
-                hash.Add(layer.DiffuseColorR);
-                hash.Add(layer.DiffuseColorG);
-                hash.Add(layer.DiffuseColorB);
-                hash.Add(layer.SpecularColorR);
-                hash.Add(layer.SpecularColorG);
-                hash.Add(layer.SpecularColorB);
+                hash.Add(layer.DiffuseColor.X);
+                hash.Add(layer.DiffuseColor.Y);
+                hash.Add(layer.DiffuseColor.Z);
+                hash.Add(layer.SpecularColor.X);
+                hash.Add(layer.SpecularColor.Y);
+                hash.Add(layer.SpecularColor.Z);
                 hash.Add(layer.Roughness);
                 hash.Add(layer.Metalness);
                 hash.Add(layer.SheenRate);
@@ -333,34 +328,34 @@ public partial class MainWindow : Window, IDisposable
             }
         }
 
-        return hash.ToHashCode().ToString();
+        return hash.ToHashCode();
     }
 
     private void TickHistoryTracker()
     {
         if (isReplayingHistory || initPhase != InitPhase.Done) return;
+        // Suppress during active canvas drag/scale so a continuous gesture produces
+        // one undo entry (the pre-gesture baseline), not a new one every 250 ms.
+        if (canvasDraggingLayer || canvasScalingLayer) return;
 
         InitializeHistoryTrackerIfNeeded();
 
-        var currentSnapshot = project.CreateSnapshot();
-        var currentSignature = ComputeSnapshotSignature(currentSnapshot);
+        var currentSignature = ComputeProjectSignature(project);
         if (historyBaselineSignature == currentSignature)
             return;
 
         var now = DateTime.UtcNow;
         var shouldPush = (now - historyLastCommitUtc).TotalMilliseconds > HistoryCoalesceMs
-                         || config.UndoHistory.Count == 0;
+                         || undoHistory.Count == 0;
 
         if (shouldPush && historyBaselineSnapshot != null)
         {
-            EnsureHistoryState();
-            config.UndoHistory.Add(historyBaselineSnapshot);
-            TrimHistory(config.UndoHistory);
-            config.RedoHistory.Clear();
-            config.Save();
+            undoHistory.Add(historyBaselineSnapshot);
+            TrimHistory(undoHistory);
+            redoHistory.Clear();
         }
 
-        historyBaselineSnapshot = currentSnapshot;
+        historyBaselineSnapshot = project.CreateSnapshot();
         historyBaselineSignature = currentSignature;
         historyLastCommitUtc = now;
     }
@@ -371,64 +366,56 @@ public partial class MainWindow : Window, IDisposable
         history.RemoveRange(0, history.Count - HistoryMaxDepth);
     }
 
-    private bool CanUndo => config.UndoHistory is { Count: > 0 };
-    private bool CanRedo => config.RedoHistory is { Count: > 0 };
+    private bool CanUndo => undoHistory.Count > 0;
+    private bool CanRedo => redoHistory.Count > 0;
 
     private void Undo()
     {
-        EnsureHistoryState();
-        if (config.UndoHistory.Count == 0) return;
+        if (undoHistory.Count == 0) return;
 
         var current = project.CreateSnapshot();
-        var index = config.UndoHistory.Count - 1;
-        var target = config.UndoHistory[index];
-        config.UndoHistory.RemoveAt(index);
+        var index = undoHistory.Count - 1;
+        var target = undoHistory[index];
+        undoHistory.RemoveAt(index);
 
-        config.RedoHistory.Add(current);
-        TrimHistory(config.RedoHistory);
+        redoHistory.Add(current);
+        TrimHistory(redoHistory);
 
-        isReplayingHistory = true;
-        try
-        {
-            project.ApplySnapshot(target, library);
-        }
-        finally
-        {
-            isReplayingHistory = false;
-        }
-
-        config.Save();
-        OnHistoryReplayed();
+        OnHistoryReplayed(ReplaySnapshot(target));
     }
 
     private void Redo()
     {
-        EnsureHistoryState();
-        if (config.RedoHistory.Count == 0) return;
+        if (redoHistory.Count == 0) return;
 
         var current = project.CreateSnapshot();
-        var index = config.RedoHistory.Count - 1;
-        var target = config.RedoHistory[index];
-        config.RedoHistory.RemoveAt(index);
+        var index = redoHistory.Count - 1;
+        var target = redoHistory[index];
+        redoHistory.RemoveAt(index);
 
-        config.UndoHistory.Add(current);
-        TrimHistory(config.UndoHistory);
+        undoHistory.Add(current);
+        TrimHistory(undoHistory);
 
+        OnHistoryReplayed(ReplaySnapshot(target));
+    }
+
+    private bool ReplaySnapshot(SavedProjectSnapshot target)
+    {
         isReplayingHistory = true;
         try
         {
+            if (project.TryApplySnapshotInPlace(target, library))
+                return true;
             project.ApplySnapshot(target, library);
+            return false;
         }
         finally
         {
             isReplayingHistory = false;
         }
-
-        config.Save();
-        OnHistoryReplayed();
     }
 
-    private void OnHistoryReplayed()
+    private void OnHistoryReplayed(bool inPlace)
     {
         ResetHistoryTrackerBaseline();
 
@@ -440,12 +427,55 @@ public partial class MainWindow : Window, IDisposable
             highlightFrameCounter = 0;
         }
 
+        SyncImagePathBuf();
+
+        if (inPlace)
+        {
+            // Structure unchanged: mesh/material handles still valid, GPU swap path composites
+            // the new params onto the existing textures without re-triggering character redraw.
+            MarkPreviewDirty(immediate: true);
+            if (project.SelectedGroup != null)
+                TryDirectEmissiveUpdate(project.SelectedGroup);
+            return;
+        }
+
         previewService.ClearTextureCache();
         previewService.ResetSwapState();
         previewService.NotifyMeshChanged();
         previewService.ForceFullRedrawNextCycle();
-        SyncImagePathBuf();
         MarkPreviewDirty(immediate: true);
+    }
+
+    private bool undoShortcutPrevZ;
+
+    // FFXIV routes keyboard to the game first; ImGui.IsKeyPressed alone won't fire when a
+    // skill bind owns the same key. Read raw state via IKeyState and null it so the game
+    // never sees the keystroke this frame.
+    private void HandleUndoRedoShortcuts()
+    {
+        if (initPhase != InitPhase.Done) return;
+        if (ImGui.GetIO().WantTextInput)
+        {
+            undoShortcutPrevZ = false;
+            return;
+        }
+
+        const Dalamud.Game.ClientState.Keys.VirtualKey ctrl = Dalamud.Game.ClientState.Keys.VirtualKey.CONTROL;
+        const Dalamud.Game.ClientState.Keys.VirtualKey shift = Dalamud.Game.ClientState.Keys.VirtualKey.SHIFT;
+        const Dalamud.Game.ClientState.Keys.VirtualKey zKey = Dalamud.Game.ClientState.Keys.VirtualKey.Z;
+
+        var ctrlDown = keyState[ctrl];
+        var shiftDown = keyState[shift];
+        var zDown = keyState[zKey];
+
+        if (ctrlDown && zDown && !undoShortcutPrevZ)
+        {
+            if (shiftDown) { if (CanRedo) Redo(); }
+            else { if (CanUndo) Undo(); }
+            keyState[zKey] = false;
+        }
+
+        undoShortcutPrevZ = zDown && ctrlDown;
     }
 
     private void SaveCanvasViewSettings()
@@ -488,7 +518,6 @@ public partial class MainWindow : Window, IDisposable
             lastMeshPathKey = BuildMeshPathKey(project.SelectedGroup);
             previewDirty = false;
             InitializeHistoryTrackerIfNeeded();
-            ResetHistoryTrackerBaseline();
         }
 
         var loading = initPhase != InitPhase.Done;
@@ -562,6 +591,7 @@ public partial class MainWindow : Window, IDisposable
             ImGui.EndTabBar();
         }
 
+        HandleUndoRedoShortcuts();
         TickHistoryTracker();
 
     }

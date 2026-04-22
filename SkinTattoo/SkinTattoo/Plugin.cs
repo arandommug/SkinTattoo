@@ -64,7 +64,8 @@ public sealed class Plugin : IDalamudPlugin
         IPluginLog log,
         IObjectTable objectTable,
         IFramework framework,
-        IGameInteropProvider gameInterop)
+        IGameInteropProvider gameInterop,
+        IKeyState keyState)
     {
         config = pluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
         config.Initialize(pluginInterface);
@@ -95,7 +96,7 @@ public sealed class Plugin : IDalamudPlugin
 
         changelogService = new ChangelogService(log);
 
-        mainWindow = new MainWindow(project, previewService, penumbra, config, textureProvider, dataManager, skinMeshResolver, changelogService, libraryService, imageLoader);
+        mainWindow = new MainWindow(project, previewService, penumbra, config, textureProvider, dataManager, skinMeshResolver, changelogService, keyState, libraryService, imageLoader);
         debugWindow = new DebugWindow();
         modelEditorWindow = new ModelEditorWindow(project, previewService, penumbra, skinMeshResolver, pluginInterface.UiBuilder.DeviceHandle);
 
