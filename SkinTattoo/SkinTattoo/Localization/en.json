@@ -317,6 +317,7 @@
     "uv_aa": "Anti-aliasing##uvAA",
     "uv_cull": "Viewport Culling##uvCull",
     "uv_dedup": "Shared Edge Dedup##uvDedup",
+    "uv_sync_layer_target": "Sync UV Viewer with Layer Target",
     "http_enable": "Enable HTTP Server##httpEn",
     "preview_current_layer": "Current Layer Only",
     "canvas_show_base": "Show Base"

@@ -494,6 +494,22 @@ public partial class MainWindow : Window, IDisposable
         config.Save();
     }
 
+    private void SyncCanvasMapToSelectedLayerIfEnabled()
+    {
+        if (!config.UvSyncViewerWithLayerTargetMap)
+            return;
+
+        var selectedLayer = project.SelectedLayer;
+        if (selectedLayer == null)
+            return;
+
+        if (CanvasMapMode == selectedLayer.TargetMap)
+            return;
+
+        CanvasMapMode = selectedLayer.TargetMap;
+        SaveCanvasViewSettings();
+    }
+
     public void OpenSettings()
     {
         IsOpen = true;

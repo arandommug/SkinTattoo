@@ -317,6 +317,7 @@
     "uv_aa": "抗锯齿##uvAA",
     "uv_cull": "视口外剔除##uvCull",
     "uv_dedup": "共享边去重##uvDedup",
+    "uv_sync_layer_target": "同步 UV 预览与图层目标贴图",
     "http_enable": "启用 HTTP 服务器##httpEn",
     "preview_current_layer": "仅预览当前图层",
     "canvas_show_base": "显示基础贴图"
