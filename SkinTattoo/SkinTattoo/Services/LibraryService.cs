@@ -338,6 +338,74 @@ public sealed class LibraryService
         return entry;
     }
 
+    public LibraryEntry? ImportProjectPayload(string hash, string blobFileName, string originalName, string folderPath, byte[] bytes)
+    {
+        if (string.IsNullOrWhiteSpace(hash) || bytes.Length == 0)
+            return null;
+
+        var normalizedFolder = NormalizeFolderPath(folderPath);
+        var ext = Path.GetExtension(blobFileName);
+        if (string.IsNullOrWhiteSpace(ext)) ext = ".png";
+        var canonicalBlob = hash + ext.ToLowerInvariant();
+        var destPath = Path.Combine(blobDir, canonicalBlob);
+
+        lock (sync)
+        {
+            if (entries.TryGetValue(hash, out var existing))
+            {
+                var existingPath = Path.Combine(blobDir, existing.FileName);
+                var shouldWrite = true;
+                if (File.Exists(existingPath))
+                {
+                    try
+                    {
+                        var currentHash = ComputeHash(File.ReadAllBytes(existingPath));
+                        shouldWrite = !currentHash.Equals(hash, StringComparison.OrdinalIgnoreCase);
+                    }
+                    catch
+                    {
+                        shouldWrite = true;
+                    }
+                }
+
+                if (shouldWrite)
+                    File.WriteAllBytes(destPath, bytes);
+
+                existing.FileName = canonicalBlob;
+                if (!string.IsNullOrWhiteSpace(originalName))
+                    existing.OriginalName = originalName;
+                existing.FolderPath = normalizedFolder;
+                existing.LastUsedAt = DateTime.UtcNow;
+                existing.UseCount++;
+                EnsureFolderTrackedLocked(normalizedFolder);
+                SaveIndexLocked();
+                QueueThumbIfMissingLocked(existing);
+                return existing;
+            }
+
+            File.WriteAllBytes(destPath, bytes);
+            var (w, h) = ProbeSize(destPath);
+            var created = new LibraryEntry
+            {
+                Hash = hash,
+                FileName = canonicalBlob,
+                OriginalName = string.IsNullOrWhiteSpace(originalName) ? canonicalBlob : originalName,
+                FolderPath = normalizedFolder,
+                AddedAt = DateTime.UtcNow,
+                LastUsedAt = DateTime.UtcNow,
+                UseCount = 1,
+                Width = w,
+                Height = h,
+            };
+
+            entries[hash] = created;
+            EnsureFolderTrackedLocked(normalizedFolder);
+            SaveIndexLocked();
+            QueueThumbIfMissingLocked(created);
+            return created;
+        }
+    }
+
     public void Touch(string hash)
     {
         lock (sync)
