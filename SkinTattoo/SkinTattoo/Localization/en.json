@@ -119,7 +119,8 @@
     "folder": {
       "all": "All",
       "name_hint": "Folder name",
-      "delete_prompt": "Delete folder \"{0}\" and all its contents?\nThis permanently deletes all files and subfolders inside.",
+      "delete_prompt": "Delete folder \"{0}\" and all its contents?",
+      "delete_warning": "⚠ This permanently deletes all files and subfolders inside. This cannot be undone.",
       "rename_prompt": "Rename folder \"{0}\" to:"
     },
     "import_folder_hint": "Folder path...",
@@ -140,9 +141,6 @@
       "delete": "Remove from library",
       "rename_folder": "Rename folder",
       "delete_folder": "Delete folder"
-    },
-    "favorites": {
-      "title": "Favorites"
     }
   },
   "button": {
